@@ -1,12 +1,19 @@
 {
   "rewrites": [
     {
-      "source": "/_vercel/insights/:path*",
-      "destination": "/_vercel/insights/:path*"
-    },
-    {
       "source": "/(.*)",
       "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
     }
   ]
 }
