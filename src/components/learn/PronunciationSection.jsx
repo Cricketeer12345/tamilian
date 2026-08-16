@@ -223,69 +223,87 @@ function PronunciationSection() {
   }
 
   function startListening() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setError('Speech recognition not supported. Please use Google Chrome.')
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+
+  if (!SpeechRecognition) {
+    setError('Speech recognition is not supported on this browser. On iPhone, please use Safari.')
+    return
+  }
+
+  // Detect iOS
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+
+  const rec = new SpeechRecognition()
+  rec.lang = 'ta-IN'
+  rec.interimResults = !isIOS  // iOS Safari doesn't support interim results
+  rec.maxAlternatives = 5
+  rec.continuous = !isIOS  // iOS Safari doesn't support continuous mode
+
+  transcriptRef.current = ''
+  recognitionRef.current = rec
+
+  setIsListening(true)
+  setWordScore(null)
+  setError('')
+  setProcessing(false)
+
+  rec.start()
+
+  rec.onresult = (event) => {
+    let bestTranscript = ''
+    let bestConfidence = 0
+    for (let i = 0; i < event.results.length; i++) {
+      for (let j = 0; j < event.results[i].length; j++) {
+        if (event.results[i][j].confidence >= bestConfidence) {
+          bestConfidence = event.results[i][j].confidence
+          bestTranscript = event.results[i][j].transcript
+        }
+      }
+    }
+    if (bestTranscript) {
+      transcriptRef.current = bestTranscript
+      // On iOS, onend fires right after onresult so process here too
+      if (isIOS) {
+        const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+        const calculated = scoreWord(bestTranscript, expectedTamil)
+        setWordScore(calculated)
+        setProcessing(false)
+      }
+    }
+  }
+
+  rec.onerror = (event) => {
+    if (event.error === 'no-speech') return
+    if (event.error === 'not-allowed') {
+      setError('Microphone access denied. Please allow microphone access in your browser settings.')
+      setIsListening(false)
+      setProcessing(false)
+      return
+    }
+    setError('Microphone issue. Please try again.')
+    setIsListening(false)
+    setProcessing(false)
+    recognitionRef.current = null
+  }
+
+  rec.onend = () => {
+    const transcript = transcriptRef.current
+    const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+
+    setIsListening(false)
+    recognitionRef.current = null
+
+    if (!transcript || transcript.trim() === '') {
+      setWordScore(0)
+      setProcessing(false)
       return
     }
 
-    const rec = new SpeechRecognition()
-    rec.lang = 'ta-IN'
-    rec.interimResults = true
-    rec.maxAlternatives = 5
-    rec.continuous = true
-
-    transcriptRef.current = ''
-    recognitionRef.current = rec
-
-    setIsListening(true)
-    setWordScore(null)
-    setError('')
+    const calculated = scoreWord(transcript, expectedTamil)
+    setWordScore(calculated)
     setProcessing(false)
-
-    rec.start()
-
-    rec.onresult = (event) => {
-      // Collect all alternatives and pick the best one later
-      let bestTranscript = ''
-      let bestConfidence = 0
-      for (let i = 0; i < event.results.length; i++) {
-        for (let j = 0; j < event.results[i].length; j++) {
-          if (event.results[i][j].confidence > bestConfidence) {
-            bestConfidence = event.results[i][j].confidence
-            bestTranscript = event.results[i][j].transcript
-          }
-        }
-      }
-      if (bestTranscript) transcriptRef.current = bestTranscript
-    }
-
-    rec.onerror = (event) => {
-      if (event.error === 'no-speech') return
-      setError('Microphone issue. Please refresh and try again.')
-      setIsListening(false)
-      setProcessing(false)
-      recognitionRef.current = null
-    }
-
-    rec.onend = () => {
-      const transcript = transcriptRef.current
-      const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-
-      setIsListening(false)
-      recognitionRef.current = null
-
-      if (!transcript || transcript.trim() === '') {
-        setWordScore(0)
-        setProcessing(false)
-        return
-      }
-
-      const calculated = scoreWord(transcript, expectedTamil)
-      setWordScore(calculated)
-      setProcessing(false)
-    }
   }
+}
 
   function stopListening() {
     if (recognitionRef.current) {
@@ -351,8 +369,8 @@ function PronunciationSection() {
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-sm text-amber-800">
-          ⚠️ Works best in <strong>Google Chrome</strong>. Allow microphone access when prompted.
-        </div>
+  ⚠️ Works best in <strong>Google Chrome</strong> on desktop or laptop. On <strong>iPhone or iPad</strong>, please use <strong>Safari</strong> — Chrome on iOS does not support microphone recognition. Allow microphone access when prompted.
+</div>
 
         <button
           onClick={startQuiz}
