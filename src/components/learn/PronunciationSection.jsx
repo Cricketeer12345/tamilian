@@ -226,56 +226,111 @@ function PronunciationSection() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
   if (!SpeechRecognition) {
-    setError('Speech recognition is not supported on this browser. On iPhone, please use Safari.')
+    setError('Speech recognition is not supported. On iPhone use Safari, on desktop use Chrome.')
     return
   }
 
-  // Detect iOS
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+  const isIOSSafari = isIOS && isSafari
+
+  transcriptRef.current = ''
 
   const rec = new SpeechRecognition()
   rec.lang = 'ta-IN'
-  rec.interimResults = !isIOS  // iOS Safari doesn't support interim results
-  rec.maxAlternatives = 5
-  rec.continuous = !isIOS  // iOS Safari doesn't support continuous mode
 
-  transcriptRef.current = ''
+  if (isIOSSafari) {
+    // iOS Safari specific settings
+    rec.continuous = false
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+  } else {
+    rec.continuous = true
+    rec.interimResults = true
+    rec.maxAlternatives = 5
+  }
+
   recognitionRef.current = rec
-
   setIsListening(true)
   setWordScore(null)
   setError('')
   setProcessing(false)
 
-  rec.start()
+  try {
+    rec.start()
+  } catch (e) {
+    setError('Could not start microphone. Please try again.')
+    setIsListening(false)
+    return
+  }
+
+  rec.onstart = () => {
+    setIsListening(true)
+  }
 
   rec.onresult = (event) => {
     let bestTranscript = ''
-    let bestConfidence = 0
-    for (let i = 0; i < event.results.length; i++) {
-      for (let j = 0; j < event.results[i].length; j++) {
-        if (event.results[i][j].confidence >= bestConfidence) {
-          bestConfidence = event.results[i][j].confidence
-          bestTranscript = event.results[i][j].transcript
+
+    if (isIOSSafari) {
+      // iOS Safari — just take the first result
+      bestTranscript = event.results[0]?.[0]?.transcript || ''
+    } else {
+      let bestConfidence = 0
+      for (let i = 0; i < event.results.length; i++) {
+        for (let j = 0; j < event.results[i].length; j++) {
+          if (event.results[i][j].confidence >= bestConfidence) {
+            bestConfidence = event.results[i][j].confidence
+            bestTranscript = event.results[i][j].transcript
+          }
         }
       }
     }
+
     if (bestTranscript) {
       transcriptRef.current = bestTranscript
-      // On iOS, onend fires right after onresult so process here too
-      if (isIOS) {
-        const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-        const calculated = scoreWord(bestTranscript, expectedTamil)
-        setWordScore(calculated)
-        setProcessing(false)
-      }
     }
   }
 
+  rec.onsoundend = () => {
+    // iOS Safari often ends automatically after sound stops
+    if (isIOSSafari && transcriptRef.current) {
+      const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+      const calculated = scoreWord(transcriptRef.current, expectedTamil)
+      setWordScore(calculated)
+      setProcessing(false)
+      setIsListening(false)
+    }
+  }
+
+  rec.onend = () => {
+    const transcript = transcriptRef.current
+    const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+
+    recognitionRef.current = null
+    setIsListening(false)
+
+    if (!transcript || transcript.trim() === '') {
+      setWordScore(prev => prev !== null ? prev : 0)
+      setProcessing(false)
+      return
+    }
+
+    const calculated = scoreWord(transcript, expectedTamil)
+    setWordScore(calculated)
+    setProcessing(false)
+  }
+
   rec.onerror = (event) => {
-    if (event.error === 'no-speech') return
+    if (event.error === 'no-speech') {
+      // On iOS no-speech is common, don't show error just end gracefully
+      setIsListening(false)
+      setProcessing(false)
+      if (!transcriptRef.current) setWordScore(0)
+      return
+    }
     if (event.error === 'not-allowed') {
-      setError('Microphone access denied. Please allow microphone access in your browser settings.')
+      setError('Microphone access denied. Go to Settings > Safari > Microphone and allow access.')
       setIsListening(false)
       setProcessing(false)
       return
@@ -285,34 +340,16 @@ function PronunciationSection() {
     setProcessing(false)
     recognitionRef.current = null
   }
-
-  rec.onend = () => {
-    const transcript = transcriptRef.current
-    const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-
-    setIsListening(false)
-    recognitionRef.current = null
-
-    if (!transcript || transcript.trim() === '') {
-      setWordScore(0)
-      setProcessing(false)
-      return
-    }
-
-    const calculated = scoreWord(transcript, expectedTamil)
-    setWordScore(calculated)
-    setProcessing(false)
-  }
 }
 
-  function stopListening() {
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch (e) {}
-    }
-    setIsListening(false)
-    setProcessing(true)
-    setAttempts(a => a + 1)
+function stopListening() {
+  if (recognitionRef.current) {
+    try { recognitionRef.current.stop() } catch (e) {}
   }
+  setIsListening(false)
+  setProcessing(true)
+  setAttempts(a => a + 1)
+}
 
   function handleNext() {
     const finalScore = wordScore !== null ? wordScore : 0
@@ -369,7 +406,7 @@ function PronunciationSection() {
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-sm text-amber-800">
-  ⚠️ Works best in <strong>Google Chrome</strong> on desktop or laptop. On <strong>iPhone or iPad</strong>, please use <strong>Safari</strong> — Chrome on iOS does not support microphone recognition. Allow microphone access when prompted.
+  ⚠️ Works best in <strong>Chrome on Android or desktop</strong>. On <strong>iPhone or iPad</strong>, use <strong>Safari</strong> and go to <strong>Settings → Safari → Microphone</strong> and set it to Allow. Speak clearly and wait a moment after clicking Start before saying the word.
 </div>
 
         <button
