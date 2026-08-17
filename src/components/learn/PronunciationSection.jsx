@@ -234,94 +234,103 @@ function PronunciationSection() {
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
   transcriptRef.current = ''
-
-  const rec = new SpeechRecognition()
-  rec.lang = 'ta-IN'
-
-  if (isIOS) {
-    rec.continuous = false
-    rec.interimResults = false
-    rec.maxAlternatives = 1
-  } else {
-    rec.continuous = true
-    rec.interimResults = true
-    rec.maxAlternatives = 5
-  }
-
-  recognitionRef.current = rec
-
-  // Start recognition FIRST synchronously before any async calls
-  // This satisfies iOS Safari's requirement that it be called
-  // directly from a user gesture
-  try {
-    rec.start()
-  } catch (e) {
-    setError('Could not start microphone. Please try again.')
-    return
-  }
-
-  setIsListening(true)
+  setIsListening(false)
   setWordScore(null)
   setError('')
   setProcessing(false)
 
-  rec.onstart = () => {
-    setIsListening(true)
-  }
+  // Request mic permission first — this triggers the native popup
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+      // Stop the stream immediately — we just needed the popup
+      stream.getTracks().forEach(track => track.stop())
 
-  rec.onresult = (event) => {
-    let bestTranscript = ''
-    if (isIOS) {
-      bestTranscript = event.results[0]?.[0]?.transcript || ''
-    } else {
-      let bestConfidence = 0
-      for (let i = 0; i < event.results.length; i++) {
-        for (let j = 0; j < event.results[i].length; j++) {
-          if (event.results[i][j].confidence >= bestConfidence) {
-            bestConfidence = event.results[i][j].confidence
-            bestTranscript = event.results[i][j].transcript
+      // Now start speech recognition
+      const rec = new SpeechRecognition()
+      rec.lang = 'ta-IN'
+
+      if (isIOS) {
+        rec.continuous = false
+        rec.interimResults = false
+        rec.maxAlternatives = 1
+      } else {
+        rec.continuous = true
+        rec.interimResults = true
+        rec.maxAlternatives = 5
+      }
+
+      recognitionRef.current = rec
+      setIsListening(true)
+
+      try {
+        rec.start()
+      } catch (e) {
+        setError('Could not start microphone. Please try again.')
+        setIsListening(false)
+        return
+      }
+
+      rec.onstart = () => setIsListening(true)
+
+      rec.onresult = (event) => {
+        let bestTranscript = ''
+        if (isIOS) {
+          bestTranscript = event.results[0]?.[0]?.transcript || ''
+        } else {
+          let bestConfidence = 0
+          for (let i = 0; i < event.results.length; i++) {
+            for (let j = 0; j < event.results[i].length; j++) {
+              if (event.results[i][j].confidence >= bestConfidence) {
+                bestConfidence = event.results[i][j].confidence
+                bestTranscript = event.results[i][j].transcript
+              }
+            }
           }
         }
+        if (bestTranscript) {
+          transcriptRef.current = bestTranscript
+        }
       }
-    }
-    if (bestTranscript) {
-      transcriptRef.current = bestTranscript
-    }
-  }
 
-  rec.onend = () => {
-    const transcript = transcriptRef.current
-    const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-    recognitionRef.current = null
-    setIsListening(false)
-    if (!transcript || transcript.trim() === '') {
-      setWordScore(0)
-      setProcessing(false)
-      return
-    }
-    const calculated = scoreWord(transcript, expectedTamil)
-    setWordScore(calculated)
-    setProcessing(false)
-  }
+      rec.onend = () => {
+        const transcript = transcriptRef.current
+        const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+        recognitionRef.current = null
+        setIsListening(false)
+        if (!transcript || transcript.trim() === '') {
+          setWordScore(0)
+          setProcessing(false)
+          return
+        }
+        const calculated = scoreWord(transcript, expectedTamil)
+        setWordScore(calculated)
+        setProcessing(false)
+      }
 
-  rec.onerror = (event) => {
-    recognitionRef.current = null
-    if (event.error === 'no-speech') {
+      rec.onerror = (event) => {
+        recognitionRef.current = null
+        if (event.error === 'no-speech') {
+          setIsListening(false)
+          setProcessing(false)
+          if (!transcriptRef.current) setWordScore(0)
+          return
+        }
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setError('Microphone access denied. When the popup appears, please tap Allow.')
+          setIsListening(false)
+          setProcessing(false)
+          return
+        }
+        setError('Microphone issue. Please try again.')
+        setIsListening(false)
+        setProcessing(false)
+      }
+    })
+    .catch(() => {
+      setError('Microphone access denied. When the popup appears, please tap Allow.')
       setIsListening(false)
       setProcessing(false)
-      if (!transcriptRef.current) setWordScore(0)
-      return
-    }
-    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      setError('Microphone access denied. Go to Settings → Privacy & Security → Microphone → turn on Safari. Then reload the page.')
-      setIsListening(false)
-      setProcessing(false)
-      return
-    }
-    setError('Microphone issue. Please try again.')
-    setIsListening(false)
-    setProcessing(false)
-  }
+    })
 }
 function stopListening() {
   if (recognitionRef.current) {
