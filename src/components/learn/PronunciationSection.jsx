@@ -234,103 +234,84 @@ function PronunciationSection() {
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
   transcriptRef.current = ''
-  setIsListening(false)
+  setIsListening(true)
   setWordScore(null)
   setError('')
   setProcessing(false)
 
-  // Request mic permission first — this triggers the native popup
-  navigator.mediaDevices.getUserMedia({ audio: true })
-    .then(stream => {
-      // Stop the stream immediately — we just needed the popup
-      stream.getTracks().forEach(track => track.stop())
+  const rec = new SpeechRecognition()
+  rec.lang = 'ta-IN'
+  rec.continuous = false
+  rec.interimResults = false
+  rec.maxAlternatives = isIOS ? 1 : 5
 
-      // Now start speech recognition
-      const rec = new SpeechRecognition()
-      rec.lang = 'ta-IN'
+  recognitionRef.current = rec
 
-      if (isIOS) {
-        rec.continuous = false
-        rec.interimResults = false
-        rec.maxAlternatives = 1
-      } else {
-        rec.continuous = true
-        rec.interimResults = true
-        rec.maxAlternatives = 5
-      }
+  rec.onstart = () => setIsListening(true)
 
-      recognitionRef.current = rec
-      setIsListening(true)
-
-      try {
-        rec.start()
-      } catch (e) {
-        setError('Could not start microphone. Please try again.')
-        setIsListening(false)
-        return
-      }
-
-      rec.onstart = () => setIsListening(true)
-
-      rec.onresult = (event) => {
-        let bestTranscript = ''
-        if (isIOS) {
-          bestTranscript = event.results[0]?.[0]?.transcript || ''
-        } else {
-          let bestConfidence = 0
-          for (let i = 0; i < event.results.length; i++) {
-            for (let j = 0; j < event.results[i].length; j++) {
-              if (event.results[i][j].confidence >= bestConfidence) {
-                bestConfidence = event.results[i][j].confidence
-                bestTranscript = event.results[i][j].transcript
-              }
-            }
+  rec.onresult = (event) => {
+    let bestTranscript = ''
+    if (isIOS) {
+      bestTranscript = event.results[0]?.[0]?.transcript || ''
+    } else {
+      let bestConfidence = 0
+      for (let i = 0; i < event.results.length; i++) {
+        for (let j = 0; j < event.results[i].length; j++) {
+          if (event.results[i][j].confidence >= bestConfidence) {
+            bestConfidence = event.results[i][j].confidence
+            bestTranscript = event.results[i][j].transcript
           }
         }
-        if (bestTranscript) {
-          transcriptRef.current = bestTranscript
-        }
       }
+    }
+    if (bestTranscript) transcriptRef.current = bestTranscript
+  }
 
-      rec.onend = () => {
-        const transcript = transcriptRef.current
-        const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-        recognitionRef.current = null
-        setIsListening(false)
-        if (!transcript || transcript.trim() === '') {
-          setWordScore(0)
-          setProcessing(false)
-          return
-        }
-        const calculated = scoreWord(transcript, expectedTamil)
-        setWordScore(calculated)
-        setProcessing(false)
-      }
-
-      rec.onerror = (event) => {
-        recognitionRef.current = null
-        if (event.error === 'no-speech') {
-          setIsListening(false)
-          setProcessing(false)
-          if (!transcriptRef.current) setWordScore(0)
-          return
-        }
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          setError('Microphone access denied. When the popup appears, please tap Allow.')
-          setIsListening(false)
-          setProcessing(false)
-          return
-        }
-        setError('Microphone issue. Please try again.')
-        setIsListening(false)
-        setProcessing(false)
-      }
-    })
-    .catch(() => {
-      setError('Microphone access denied. When the popup appears, please tap Allow.')
-      setIsListening(false)
+  rec.onend = () => {
+    const transcript = transcriptRef.current
+    const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+    recognitionRef.current = null
+    setIsListening(false)
+    if (!transcript || transcript.trim() === '') {
+      setWordScore(0)
       setProcessing(false)
-    })
+      return
+    }
+    const calculated = scoreWord(transcript, expectedTamil)
+    setWordScore(calculated)
+    setProcessing(false)
+  }
+
+  rec.onerror = (event) => {
+    recognitionRef.current = null
+    setIsListening(false)
+    setProcessing(false)
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      // Try requesting permission explicitly then tell user to try again
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          stream.getTracks().forEach(t => t.stop())
+          setError('Microphone access granted. Please press Start again.')
+        })
+        .catch(() => {
+          setError('Microphone access denied. Please tap Allow when the popup appears.')
+        })
+      return
+    }
+    if (event.error === 'no-speech') {
+      setWordScore(0)
+      return
+    }
+    setError('Microphone issue. Please try again.')
+  }
+
+  // Start recognition directly — must be synchronous from user tap
+  try {
+    rec.start()
+  } catch (e) {
+    setIsListening(false)
+    setError('Could not start microphone. Please try again.')
+  }
 }
 function stopListening() {
   if (recognitionRef.current) {
@@ -505,12 +486,12 @@ function stopListening() {
           }`}
         >
           {isListening
-            ? '⏹️ Stop'
-            : processing
-            ? 'Calculating...'
-            : attempts === 1
-            ? '🔁 Try Again'
-            : '🎤 Start'}
+  ? '🎙️ Listening... (say the word)'
+  : processing
+  ? 'Calculating...'
+  : attempts === 1
+  ? '🔁 Try Again'
+  : '🎤 Start'}
         </button>
       )}
 
