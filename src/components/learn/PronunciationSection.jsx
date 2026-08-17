@@ -121,7 +121,6 @@ function pickRandomWords() {
   return [...pick(simple, 3), ...pick(medium, 3), ...pick(complex, 3)]
 }
 
-// Detect iOS once at module level
 const isIOS = typeof navigator !== 'undefined' && (
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -137,6 +136,9 @@ function PronunciationSection() {
   const [isListening, setIsListening] = useState(false)
   const [error, setError] = useState('')
   const [processing, setProcessing] = useState(false)
+  // iOS two-tap state
+  const [iosPermissionGranted, setIosPermissionGranted] = useState(false)
+  const [iosReadyToSpeak, setIosReadyToSpeak] = useState(false)
 
   const recognitionRef = useRef(null)
   const transcriptRef = useRef('')
@@ -158,6 +160,7 @@ function PronunciationSection() {
     setError('')
     setIsListening(false)
     setProcessing(false)
+    setIosReadyToSpeak(false)
     transcriptRef.current = ''
     setScreen('practice')
   }
@@ -173,6 +176,7 @@ function PronunciationSection() {
     setError('')
     setIsListening(false)
     setProcessing(false)
+    setIosReadyToSpeak(false)
   }
 
   function processResult(transcript) {
@@ -183,88 +187,109 @@ function PronunciationSection() {
     setWordScore(calculated)
     setIsListening(false)
     setProcessing(false)
+    setIosReadyToSpeak(false)
     recognitionRef.current = null
   }
 
-  function startListening() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-  if (!SpeechRecognition) {
-    setError('Speech recognition not supported. On iPhone use Safari, on desktop use Chrome.')
-    return
-  }
-
-  setError('')
-  setWordScore(null)
-  setProcessing(false)
-  transcriptRef.current = ''
-
-    if (isIOS) {
-    // Step 1: getUserMedia triggers the permission popup
+  // iOS TAP 1 — request permission via getUserMedia
+  // This triggers the native popup
+  function iosRequestPermission() {
+    setError('')
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then((stream) => {
-        // Step 2: Stop the stream COMPLETELY before starting recognition
-        // iOS cannot run getUserMedia and SpeechRecognition at the same time
-        // Once permission is granted it stays for the session
+        // Stop immediately — we just needed the popup
         stream.getTracks().forEach(t => t.stop())
-
-        // Small delay to let iOS fully release the microphone
-        setTimeout(() => {
-          const rec = new SpeechRecognition()
-          rec.lang = 'ta-IN'
-          rec.continuous = false
-          rec.interimResults = false
-          rec.maxAlternatives = 1
-          recognitionRef.current = rec
-
-          rec.onstart = () => setIsListening(true)
-
-          rec.onresult = (event) => {
-            let best = ''
-            for (let i = 0; i < event.results.length; i++) {
-              for (let j = 0; j < event.results[i].length; j++) {
-                const t = event.results[i][j].transcript || ''
-                if (t.length > best.length) best = t
-              }
-            }
-            transcriptRef.current = best
-            syncAttempts(attemptsRef.current + 1)
-            processResult(best)
-          }
-
-          rec.onerror = (event) => {
-            recognitionRef.current = null
-            setIsListening(false)
-            setProcessing(false)
-            if (event.error === 'no-speech') {
-              syncAttempts(attemptsRef.current + 1)
-              setWordScore(0)
-              return
-            }
-            setError('Could not hear you. Please try again.')
-          }
-
-          rec.onend = () => {
-            recognitionRef.current = null
-            setIsListening(false)
-            if (!transcriptRef.current) {
-              syncAttempts(attemptsRef.current + 1)
-              processResult('')
-            }
-          }
-
-          try {
-            rec.start()
-          } catch (e) {
-            setError('Could not start microphone. Please try again.')
-            setIsListening(false)
-          }
-        }, 500)
+        setIosPermissionGranted(true)
+        setIosReadyToSpeak(true)
       })
       .catch(() => {
-        setError('Microphone access denied. Tap Allow when the popup appears, then press Start again.')
+        setError('Microphone access denied. Tap Allow when the popup appears.')
       })
-  } else {
-    // Non-iOS — start recognition directly
+  }
+
+  // iOS TAP 2 — called synchronously from button tap, starts recognition directly
+  function iosStartRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setError('Speech recognition not supported. Please use Safari on iPhone.')
+      return
+    }
+
+    transcriptRef.current = ''
+    setError('')
+    setWordScore(null)
+    setProcessing(false)
+
+    const rec = new SpeechRecognition()
+    rec.lang = 'ta-IN'
+    rec.continuous = false
+    rec.interimResults = false
+    rec.maxAlternatives = 1
+    recognitionRef.current = rec
+
+    // Start SYNCHRONOUSLY — this is a direct tap so iOS allows it
+    try {
+      rec.start()
+      setIsListening(true)
+    } catch (e) {
+      setError('Could not start. Please try again.')
+      return
+    }
+
+    rec.onresult = (event) => {
+      let best = ''
+      for (let i = 0; i < event.results.length; i++) {
+        for (let j = 0; j < event.results[i].length; j++) {
+          const t = event.results[i][j].transcript || ''
+          if (t.length > best.length) best = t
+        }
+      }
+      transcriptRef.current = best
+      syncAttempts(attemptsRef.current + 1)
+      processResult(best)
+    }
+
+    rec.onerror = (event) => {
+      recognitionRef.current = null
+      setIsListening(false)
+      setProcessing(false)
+      setIosReadyToSpeak(false)
+      if (event.error === 'no-speech') {
+        syncAttempts(attemptsRef.current + 1)
+        setWordScore(0)
+        return
+      }
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setIosPermissionGranted(false)
+        setError('Permission lost. Tap the button again to re-allow microphone.')
+        return
+      }
+      setError('Could not hear you. Please try again.')
+    }
+
+    rec.onend = () => {
+      recognitionRef.current = null
+      setIsListening(false)
+      if (!transcriptRef.current) {
+        syncAttempts(attemptsRef.current + 1)
+        processResult('')
+      }
+    }
+  }
+
+  // Non-iOS start/stop
+  function startListening() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setError('Speech recognition not supported. Use Chrome on desktop or Android.')
+      return
+    }
+
+    transcriptRef.current = ''
+    setError('')
+    setWordScore(null)
+    setProcessing(false)
+
     const rec = new SpeechRecognition()
     rec.lang = 'ta-IN'
     rec.continuous = false
@@ -275,8 +300,7 @@ function PronunciationSection() {
     rec.onstart = () => setIsListening(true)
 
     rec.onresult = (event) => {
-      let best = ''
-      let bestConfidence = 0
+      let best = '', bestConfidence = 0
       for (let i = 0; i < event.results.length; i++) {
         for (let j = 0; j < event.results[i].length; j++) {
           if (event.results[i][j].confidence >= bestConfidence) {
@@ -288,9 +312,7 @@ function PronunciationSection() {
       transcriptRef.current = best
     }
 
-    rec.onend = () => {
-      processResult(transcriptRef.current)
-    }
+    rec.onend = () => processResult(transcriptRef.current)
 
     rec.onerror = (event) => {
       recognitionRef.current = null
@@ -308,13 +330,10 @@ function PronunciationSection() {
       rec.start()
     } catch (e) {
       setError('Could not start microphone. Please try again.')
-      setIsListening(false)
     }
   }
-}
 
   function stopListening() {
-    // Only for non-iOS
     if (recognitionRef.current) {
       try { recognitionRef.current.stop() } catch (e) {}
     }
@@ -341,7 +360,6 @@ function PronunciationSection() {
     : 0
   const finalTier = getTier(overallScore)
 
-  // WELCOME SCREEN
   if (screen === 'welcome') {
     return (
       <div className="max-w-xl mx-auto py-12 px-6">
@@ -361,8 +379,8 @@ function PronunciationSection() {
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">2.</span>
               {isIOS
-                ? <p className="text-gray-600">Tap <strong>Start</strong>, say the word clearly, then wait — it will score automatically.</p>
-                : <p className="text-gray-600">Click <strong>Start</strong> to begin recording, then click <strong>Stop</strong> when you are done saying the word.</p>
+                ? <p className="text-gray-600">Tap <strong>Allow Microphone</strong> first, then tap <strong>Speak</strong> and say the word clearly — it scores automatically.</p>
+                : <p className="text-gray-600">Click <strong>Start</strong> to record, then <strong>Stop</strong> when done.</p>
               }
             </div>
             <div className="flex gap-4">
@@ -371,7 +389,7 @@ function PronunciationSection() {
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">4.</span>
-              <p className="text-gray-600">Maximum <strong>2 attempts per word</strong>. Tap Next Word when ready.</p>
+              <p className="text-gray-600">Maximum <strong>2 attempts per word</strong>.</p>
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">5.</span>
@@ -382,7 +400,7 @@ function PronunciationSection() {
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-sm text-amber-800">
           {isIOS
-            ? '⚠️ Use Safari on iPhone. Tap Start, say the word clearly and pause — it will auto-stop. Allow microphone when the popup appears.'
+            ? '⚠️ Use Safari on iPhone. You will tap Allow Microphone first, then a Speak button will appear. Tap it and say the word clearly.'
             : '⚠️ Works best in Google Chrome. Allow microphone access when prompted.'
           }
         </div>
@@ -397,7 +415,6 @@ function PronunciationSection() {
     )
   }
 
-  // RESULTS SCREEN
   if (screen === 'results') {
     return (
       <div className="max-w-xl mx-auto py-12 px-6">
@@ -405,7 +422,6 @@ function PronunciationSection() {
           <h2 className="text-3xl font-bold text-red-800 mb-2">Your Results</h2>
           <p className="text-gray-500">Here is how you did across all 9 words.</p>
         </div>
-
         <div className="bg-white rounded-2xl shadow p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-700 mb-4">Word by Word</h3>
           <div className="space-y-3">
@@ -426,12 +442,9 @@ function PronunciationSection() {
             ))}
           </div>
         </div>
-
         {finalTier && (
           <div className={`rounded-2xl border p-8 text-center ${finalTier.bg} ${finalTier.border}`}>
-            <p className="text-6xl font-bold mb-2">
-              {overallScore}<span className="text-3xl">/100</span>
-            </p>
+            <p className="text-6xl font-bold mb-2">{overallScore}<span className="text-3xl">/100</span></p>
             <p className={`text-3xl font-bold mb-1 ${finalTier.color}`}>{finalTier.tamil}</p>
             <p className={`text-xl font-semibold mb-1 ${finalTier.color}`}>{finalTier.english}</p>
             <p className="text-gray-600 mb-6">{finalTier.message}</p>
@@ -443,7 +456,6 @@ function PronunciationSection() {
             />
           </div>
         )}
-
         <button
           onClick={startQuiz}
           className="w-full mt-6 bg-red-800 text-white py-4 rounded-xl text-lg font-bold hover:bg-red-700 transition"
@@ -480,30 +492,44 @@ function PronunciationSection() {
         Attempts used: {attempts} / 2
       </p>
 
-      {/* iOS — Start only, auto stops after speech */}
+      {/* iOS TWO-TAP FLOW */}
       {isIOS && attempts < 2 && (
-        <button
-          onClick={isListening || processing ? undefined : startListening}
-          disabled={isListening || processing}
-          className={`w-full py-4 rounded-xl font-bold text-white text-lg transition mb-4 ${
-            isListening
-              ? 'bg-red-500 cursor-not-allowed animate-pulse'
-              : processing
-              ? 'bg-gray-400 cursor-not-allowed'
-              : 'bg-red-800 hover:bg-red-700'
-          }`}
-        >
-          {isListening
-            ? '🎙️ Listening... say the word'
-            : processing
-            ? 'Calculating...'
-            : attempts === 1
-            ? '🔁 Try Again'
-            : '🎤 Start'}
-        </button>
+        <div className="flex flex-col gap-3 mb-4">
+          {/* TAP 1 — always visible, gets permission */}
+          {!iosPermissionGranted && (
+            <button
+              onClick={iosRequestPermission}
+              className="w-full py-4 rounded-xl font-bold text-white text-lg bg-red-800 hover:bg-red-700 transition"
+            >
+              🎙️ Allow Microphone
+            </button>
+          )}
+
+          {/* TAP 2 — appears after permission granted, starts recognition synchronously */}
+          {iosPermissionGranted && !isListening && !processing && (
+            <button
+              onClick={iosStartRecognition}
+              className="w-full py-4 rounded-xl font-bold text-white text-lg bg-red-800 hover:bg-red-700 transition"
+            >
+              {attempts === 1 ? '🔁 Try Again' : '🎤 Speak Now'}
+            </button>
+          )}
+
+          {isListening && (
+            <div className="w-full py-4 rounded-xl font-bold text-white text-lg bg-red-500 text-center animate-pulse">
+              🎙️ Listening... say the word
+            </div>
+          )}
+
+          {processing && (
+            <div className="w-full py-4 rounded-xl font-bold text-white text-lg bg-gray-400 text-center">
+              Calculating...
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Non-iOS — Start and Stop */}
+      {/* NON-iOS FLOW */}
       {!isIOS && attempts < 2 && (
         <button
           onClick={isListening ? stopListening : startListening}
