@@ -198,67 +198,67 @@ function PronunciationSection() {
   setProcessing(false)
   transcriptRef.current = ''
 
-  if (isIOS) {
-    // On iOS we MUST call getUserMedia first — this is what triggers the popup
-    // Speech recognition alone never shows the popup on iOS
+    if (isIOS) {
+    // Step 1: getUserMedia triggers the permission popup
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then((stream) => {
-        // Keep stream open while recognition runs — do NOT stop it yet
-        // Stopping it before rec.start() causes permission to lapse on iOS
-        const rec = new SpeechRecognition()
-        rec.lang = 'ta-IN'
-        rec.continuous = false
-        rec.interimResults = false
-        rec.maxAlternatives = 1
-        recognitionRef.current = rec
+        // Step 2: Stop the stream COMPLETELY before starting recognition
+        // iOS cannot run getUserMedia and SpeechRecognition at the same time
+        // Once permission is granted it stays for the session
+        stream.getTracks().forEach(t => t.stop())
 
-        rec.onstart = () => setIsListening(true)
+        // Small delay to let iOS fully release the microphone
+        setTimeout(() => {
+          const rec = new SpeechRecognition()
+          rec.lang = 'ta-IN'
+          rec.continuous = false
+          rec.interimResults = false
+          rec.maxAlternatives = 1
+          recognitionRef.current = rec
 
-        rec.onresult = (event) => {
-          let best = ''
-          for (let i = 0; i < event.results.length; i++) {
-            for (let j = 0; j < event.results[i].length; j++) {
-              const t = event.results[i][j].transcript || ''
-              if (t.length > best.length) best = t
+          rec.onstart = () => setIsListening(true)
+
+          rec.onresult = (event) => {
+            let best = ''
+            for (let i = 0; i < event.results.length; i++) {
+              for (let j = 0; j < event.results[i].length; j++) {
+                const t = event.results[i][j].transcript || ''
+                if (t.length > best.length) best = t
+              }
+            }
+            transcriptRef.current = best
+            syncAttempts(attemptsRef.current + 1)
+            processResult(best)
+          }
+
+          rec.onerror = (event) => {
+            recognitionRef.current = null
+            setIsListening(false)
+            setProcessing(false)
+            if (event.error === 'no-speech') {
+              syncAttempts(attemptsRef.current + 1)
+              setWordScore(0)
+              return
+            }
+            setError('Could not hear you. Please try again.')
+          }
+
+          rec.onend = () => {
+            recognitionRef.current = null
+            setIsListening(false)
+            if (!transcriptRef.current) {
+              syncAttempts(attemptsRef.current + 1)
+              processResult('')
             }
           }
-          transcriptRef.current = best
-          // Stop the getUserMedia stream now that we have the result
-          stream.getTracks().forEach(t => t.stop())
-          syncAttempts(attemptsRef.current + 1)
-          processResult(best)
-        }
 
-        rec.onerror = (event) => {
-          stream.getTracks().forEach(t => t.stop())
-          recognitionRef.current = null
-          setIsListening(false)
-          setProcessing(false)
-          if (event.error === 'no-speech') {
-            syncAttempts(attemptsRef.current + 1)
-            setWordScore(0)
-            return
+          try {
+            rec.start()
+          } catch (e) {
+            setError('Could not start microphone. Please try again.')
+            setIsListening(false)
           }
-          setError('Could not hear you. Please try again.')
-        }
-
-        rec.onend = () => {
-          stream.getTracks().forEach(t => t.stop())
-          if (!transcriptRef.current) {
-            syncAttempts(attemptsRef.current + 1)
-            processResult('')
-          }
-          setIsListening(false)
-          recognitionRef.current = null
-        }
-
-        try {
-          rec.start()
-        } catch (e) {
-          stream.getTracks().forEach(t => t.stop())
-          setError('Could not start microphone. Please try again.')
-          setIsListening(false)
-        }
+        }, 500)
       })
       .catch(() => {
         setError('Microphone access denied. Tap Allow when the popup appears, then press Start again.')
