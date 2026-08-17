@@ -150,7 +150,7 @@ function AlphabetSection() {
                     ) : (
                         <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6 text-center">
                             <p className="text-4xl mb-3">👆</p>
-                            <p className="text-gray-400 text-sm">Hover over any letter to see details</p>
+                            <p className="text-gray-400 text-sm">Hover over any letter to see details (rotate device on mobile)</p>
                         </div>
                     )}
 
