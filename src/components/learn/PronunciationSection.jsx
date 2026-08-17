@@ -222,7 +222,7 @@ function PronunciationSection() {
     setProcessing(false)
   }
 
-  function startListening() {
+  async function startListening() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
   if (!SpeechRecognition) {
@@ -232,16 +232,26 @@ function PronunciationSection() {
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-  const isIOSSafari = isIOS && isSafari
+
+  // On iOS Safari we must manually request mic permission first
+  // This triggers the native permission popup
+  if (isIOS) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      // Stop the stream immediately — we just needed the permission prompt
+      stream.getTracks().forEach(track => track.stop())
+    } catch (e) {
+      setError('Microphone access denied. Go to Settings → Safari → scroll to Tamilian → enable Microphone.')
+      return
+    }
+  }
 
   transcriptRef.current = ''
 
   const rec = new SpeechRecognition()
   rec.lang = 'ta-IN'
 
-  if (isIOSSafari) {
-    // iOS Safari specific settings
+  if (isIOS) {
     rec.continuous = false
     rec.interimResults = false
     rec.maxAlternatives = 1
@@ -272,8 +282,7 @@ function PronunciationSection() {
   rec.onresult = (event) => {
     let bestTranscript = ''
 
-    if (isIOSSafari) {
-      // iOS Safari — just take the first result
+    if (isIOS) {
       bestTranscript = event.results[0]?.[0]?.transcript || ''
     } else {
       let bestConfidence = 0
@@ -292,17 +301,6 @@ function PronunciationSection() {
     }
   }
 
-  rec.onsoundend = () => {
-    // iOS Safari often ends automatically after sound stops
-    if (isIOSSafari && transcriptRef.current) {
-      const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-      const calculated = scoreWord(transcriptRef.current, expectedTamil)
-      setWordScore(calculated)
-      setProcessing(false)
-      setIsListening(false)
-    }
-  }
-
   rec.onend = () => {
     const transcript = transcriptRef.current
     const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
@@ -311,7 +309,7 @@ function PronunciationSection() {
     setIsListening(false)
 
     if (!transcript || transcript.trim() === '') {
-      setWordScore(prev => prev !== null ? prev : 0)
+      setWordScore(0)
       setProcessing(false)
       return
     }
@@ -322,15 +320,22 @@ function PronunciationSection() {
   }
 
   rec.onerror = (event) => {
+    recognitionRef.current = null
+
     if (event.error === 'no-speech') {
-      // On iOS no-speech is common, don't show error just end gracefully
       setIsListening(false)
       setProcessing(false)
       if (!transcriptRef.current) setWordScore(0)
       return
     }
     if (event.error === 'not-allowed') {
-      setError('Microphone access denied. Go to Settings > Safari > Microphone and allow access.')
+      setError('Microphone access denied. Go to Settings → Safari → scroll to Tamilian → enable Microphone.')
+      setIsListening(false)
+      setProcessing(false)
+      return
+    }
+    if (event.error === 'service-not-allowed') {
+      setError('Speech recognition not allowed. Make sure you are using Safari on iPhone and microphone is enabled in Settings.')
       setIsListening(false)
       setProcessing(false)
       return
@@ -338,7 +343,6 @@ function PronunciationSection() {
     setError('Microphone issue. Please try again.')
     setIsListening(false)
     setProcessing(false)
-    recognitionRef.current = null
   }
 }
 
