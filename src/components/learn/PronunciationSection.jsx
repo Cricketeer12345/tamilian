@@ -187,75 +187,123 @@ function PronunciationSection() {
   }
 
   function startListening() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setError('Speech recognition not supported. On iPhone use Safari, on desktop use Chrome.')
-      return
-    }
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (!SpeechRecognition) {
+    setError('Speech recognition not supported. On iPhone use Safari, on desktop use Chrome.')
+    return
+  }
 
-    transcriptRef.current = ''
-    setError('')
-    setWordScore(null)
-    setProcessing(false)
+  setError('')
+  setWordScore(null)
+  setProcessing(false)
+  transcriptRef.current = ''
 
+  if (isIOS) {
+    // On iOS we MUST call getUserMedia first — this is what triggers the popup
+    // Speech recognition alone never shows the popup on iOS
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        // Keep stream open while recognition runs — do NOT stop it yet
+        // Stopping it before rec.start() causes permission to lapse on iOS
+        const rec = new SpeechRecognition()
+        rec.lang = 'ta-IN'
+        rec.continuous = false
+        rec.interimResults = false
+        rec.maxAlternatives = 1
+        recognitionRef.current = rec
+
+        rec.onstart = () => setIsListening(true)
+
+        rec.onresult = (event) => {
+          let best = ''
+          for (let i = 0; i < event.results.length; i++) {
+            for (let j = 0; j < event.results[i].length; j++) {
+              const t = event.results[i][j].transcript || ''
+              if (t.length > best.length) best = t
+            }
+          }
+          transcriptRef.current = best
+          // Stop the getUserMedia stream now that we have the result
+          stream.getTracks().forEach(t => t.stop())
+          syncAttempts(attemptsRef.current + 1)
+          processResult(best)
+        }
+
+        rec.onerror = (event) => {
+          stream.getTracks().forEach(t => t.stop())
+          recognitionRef.current = null
+          setIsListening(false)
+          setProcessing(false)
+          if (event.error === 'no-speech') {
+            syncAttempts(attemptsRef.current + 1)
+            setWordScore(0)
+            return
+          }
+          setError('Could not hear you. Please try again.')
+        }
+
+        rec.onend = () => {
+          stream.getTracks().forEach(t => t.stop())
+          if (!transcriptRef.current) {
+            syncAttempts(attemptsRef.current + 1)
+            processResult('')
+          }
+          setIsListening(false)
+          recognitionRef.current = null
+        }
+
+        try {
+          rec.start()
+        } catch (e) {
+          stream.getTracks().forEach(t => t.stop())
+          setError('Could not start microphone. Please try again.')
+          setIsListening(false)
+        }
+      })
+      .catch(() => {
+        setError('Microphone access denied. Tap Allow when the popup appears, then press Start again.')
+      })
+  } else {
+    // Non-iOS — start recognition directly
     const rec = new SpeechRecognition()
     rec.lang = 'ta-IN'
     rec.continuous = false
     rec.interimResults = false
-    rec.maxAlternatives = isIOS ? 1 : 5
+    rec.maxAlternatives = 5
     recognitionRef.current = rec
 
     rec.onstart = () => setIsListening(true)
 
     rec.onresult = (event) => {
-      // Grab the best transcript
       let best = ''
+      let bestConfidence = 0
       for (let i = 0; i < event.results.length; i++) {
         for (let j = 0; j < event.results[i].length; j++) {
-          const t = event.results[i][j].transcript || ''
-          if (t.length > best.length) best = t
+          if (event.results[i][j].confidence >= bestConfidence) {
+            bestConfidence = event.results[i][j].confidence
+            best = event.results[i][j].transcript
+          }
         }
       }
       transcriptRef.current = best
-
-      // On iOS score immediately here since onend may fire before this finishes
-      if (isIOS) {
-        syncAttempts(attemptsRef.current + 1)
-        processResult(best)
-      }
     }
 
     rec.onend = () => {
-      // On non-iOS, score here after stop is pressed
-      if (!isIOS) {
-        processResult(transcriptRef.current)
-      } else {
-        // If onend fires on iOS without onresult (no speech detected)
-        if (isListening) {
-          syncAttempts(attemptsRef.current + 1)
-          processResult('')
-        }
-      }
+      processResult(transcriptRef.current)
     }
 
     rec.onerror = (event) => {
       recognitionRef.current = null
       setIsListening(false)
       setProcessing(false)
-
       if (event.error === 'no-speech') {
         syncAttempts(attemptsRef.current + 1)
         setWordScore(0)
         return
       }
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setError('Microphone access denied. Tap Allow when the popup appears, then press Start again.')
-        return
-      }
       setError('Microphone issue. Please try again.')
     }
 
-    // Must call start() synchronously from button tap
     try {
       rec.start()
     } catch (e) {
@@ -263,6 +311,7 @@ function PronunciationSection() {
       setIsListening(false)
     }
   }
+}
 
   function stopListening() {
     // Only for non-iOS
