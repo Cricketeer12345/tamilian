@@ -3,31 +3,47 @@ import pronunciationWords from '../../data/pronunciationWords'
 
 const tiers = [
   {
-    min: 0, max: 20,
-    tamil: "சின்ன பையன்", english: "Chinna Payan",
+    min: 0,
+    max: 20,
+    tamil: "சின்ன பையன்",
+    english: "Chinna Payan",
     message: "Enna pesure bro 😭 Keep practicing!",
-    color: "text-red-600", bg: "bg-red-50", border: "border-red-200",
+    color: "text-red-600",
+    bg: "bg-red-50",
+    border: "border-red-200",
     image: "/memes/chinna-payan.jpg",
   },
   {
-    min: 20, max: 60,
-    tamil: "பெரிய பையன்", english: "Periya Payan",
+    min: 20,
+    max: 60,
+    tamil: "பெரிய பையன்",
+    english: "Periya Payan",
     message: "Not bad da, keep trying! 🙂",
-    color: "text-orange-600", bg: "bg-orange-50", border: "border-orange-200",
+    color: "text-orange-600",
+    bg: "bg-orange-50",
+    border: "border-orange-200",
     image: "/memes/periya-payan.jpg",
   },
   {
-    min: 60, max: 80,
-    tamil: "பெரியவர்", english: "Periyavar",
+    min: 60,
+    max: 80,
+    tamil: "பெரியவர்",
+    english: "Periyavar",
     message: "Aama! Getting there! 💪",
-    color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200",
+    color: "text-blue-600",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
     image: "/memes/periyavar.jpg",
   },
   {
-    min: 80, max: 101,
-    tamil: "அறிவாளர்", english: "Arivalar",
+    min: 80,
+    max: 101,
+    tamil: "அறிவாளர்",
+    english: "Arivalar",
     message: "Seri da, nee Tamil thaan! 🔥",
-    color: "text-green-600", bg: "bg-green-50", border: "border-green-200",
+    color: "text-green-600",
+    bg: "bg-green-50",
+    border: "border-green-200",
     image: "/memes/arivalar.jpg",
   },
 ]
@@ -38,33 +54,53 @@ function getTier(score) {
 
 function scoreWord(heard, expectedTamil) {
   if (!heard || heard.trim() === '') return 0
+
+  // Light normalization — only remove leading/trailing space
+  // Keep all Tamil characters including vowel markers
   const normalize = str => str.trim().replace(/\s+/g, '')
+
   const heardClean = normalize(heard)
   const expectedClean = normalize(expectedTamil)
-  if (heardClean === expectedClean) return Math.round(95 + Math.random() * 5)
+
+  // True exact match — still only 98 since speech recognition is never perfect
+  if (heardClean === expectedClean){ return Math.round(95+ (Math.random()*5))}
+
+  // Contains check — slightly off but close
   if (heardClean.includes(expectedClean)) return 85
   if (expectedClean.includes(heardClean) && heardClean.length >= expectedClean.length * 0.8) return 80
 
+  // Sequence score — characters matching in order
   function sequenceScore(a, b) {
-    let matches = 0, j = 0
+    let matches = 0
+    let j = 0
     for (let i = 0; i < a.length && j < b.length; i++) {
       if (a[i] === b[j]) { matches++; j++ }
     }
     return matches / b.length
   }
+
+  // Character overlap regardless of order
   function overlapScore(a, b) {
-    const aArr = [...a]; let matched = 0
+    const aArr = [...a]
+    let matched = 0
     for (const ch of [...b]) {
       const idx = aArr.indexOf(ch)
       if (idx !== -1) { matched++; aArr.splice(idx, 1) }
     }
     return matched / b.length
   }
+
+  // Prefix match — first 2 chars
   function prefixScore(a, b) {
-    const len = Math.min(2, b.length); let matches = 0
-    for (let i = 0; i < len; i++) { if (a[i] === b[i]) matches++ }
+    const len = Math.min(2, b.length)
+    let matches = 0
+    for (let i = 0; i < len; i++) {
+      if (a[i] === b[i]) matches++
+    }
     return matches / len
   }
+
+  // Bigram score
   function bigramScore(a, b) {
     if (b.length < 2) return 0
     const getBigrams = str => {
@@ -72,25 +108,47 @@ function scoreWord(heard, expectedTamil) {
       for (let i = 0; i < str.length - 1; i++) bg.push(str[i] + str[i + 1])
       return bg
     }
-    const aBg = getBigrams(a), bBg = getBigrams(b); let matched = 0
+    const aBg = getBigrams(a)
+    const bBg = getBigrams(b)
+    let matched = 0
     const aCopy = [...aBg]
-    for (const bg of bBg) { const idx = aCopy.indexOf(bg); if (idx !== -1) { matched++; aCopy.splice(idx, 1) } }
+    for (const bg of bBg) {
+      const idx = aCopy.indexOf(bg)
+      if (idx !== -1) { matched++; aCopy.splice(idx, 1) }
+    }
     return matched / bBg.length
   }
+
+  // Exact character position matches
   function positionScore(a, b) {
-    const len = Math.min(a.length, b.length); let matches = 0
-    for (let i = 0; i < len; i++) { if (a[i] === b[i]) matches++ }
+    const len = Math.min(a.length, b.length)
+    let matches = 0
+    for (let i = 0; i < len; i++) {
+      if (a[i] === b[i]) matches++
+    }
     return matches / Math.max(a.length, b.length)
   }
+
+  // Length difference penalty — the more different the length the more we penalize
   const lenDiff = Math.abs(heardClean.length - expectedClean.length)
   const lenPenalty = Math.max(0.5, 1 - lenDiff * 0.08)
+
+  const seq = sequenceScore(heardClean, expectedClean)
+  const overlap = overlapScore(heardClean, expectedClean)
+  const prefix = prefixScore(heardClean, expectedClean)
+  const bigram = bigramScore(heardClean, expectedClean)
+  const position = positionScore(heardClean, expectedClean)
+
+  // Weighted combination
   const combined = (
-    positionScore(heardClean, expectedClean) * 0.30 +
-    sequenceScore(heardClean, expectedClean) * 0.25 +
-    bigramScore(heardClean, expectedClean) * 0.20 +
-    overlapScore(heardClean, expectedClean) * 0.15 +
-    prefixScore(heardClean, expectedClean) * 0.10
+    position * 0.30 +
+    seq * 0.25 +
+    bigram * 0.20 +
+    overlap * 0.15 +
+    prefix * 0.10
   ) * lenPenalty
+
+  // Piecewise curve for natural spread
   let finalScore
   if (combined >= 0.92) finalScore = 88 + (combined - 0.92) * 150
   else if (combined >= 0.75) finalScore = 70 + (combined - 0.75) * 106
@@ -98,6 +156,8 @@ function scoreWord(heard, expectedTamil) {
   else if (combined >= 0.35) finalScore = 30 + (combined - 0.35) * 100
   else if (combined >= 0.15) finalScore = 12 + (combined - 0.15) * 90
   else finalScore = combined * 80
+// Only give 100 for perfect exact match (handled above)
+  // Cap everything else at 95 for near-perfect
   return Math.round(Math.min(95, Math.max(1, finalScore)))
 }
 
@@ -124,18 +184,23 @@ function PronunciationSection() {
   const transcriptRef = useRef('')
   const currentIndexRef = useRef(0)
   const wordsRef = useRef([])
-  const attemptsRef = useRef(0)
 
-  function syncIndex(idx) { setCurrentIndex(idx); currentIndexRef.current = idx }
-  function syncWords(w) { setWords(w); wordsRef.current = w }
-  function syncAttempts(n) { setAttempts(n); attemptsRef.current = n }
+  function syncIndex(idx) {
+    setCurrentIndex(idx)
+    currentIndexRef.current = idx
+  }
+
+  function syncWords(w) {
+    setWords(w)
+    wordsRef.current = w
+  }
 
   function startQuiz() {
     const selected = pickRandomWords()
     syncWords(selected)
     syncIndex(0)
-    syncAttempts(0)
     setScores([])
+    setAttempts(0)
     setWordScore(null)
     setError('')
     setIsListening(false)
@@ -150,92 +215,112 @@ function PronunciationSection() {
       recognitionRef.current = null
     }
     transcriptRef.current = ''
-    syncAttempts(0)
+    setAttempts(0)
     setWordScore(null)
     setError('')
     setIsListening(false)
     setProcessing(false)
   }
 
-  // Called directly from button tap — no async before rec.start()
   function startListening() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setError('Speech recognition not supported. On iPhone use Safari, on desktop use Chrome.')
-      return
-    }
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
-    transcriptRef.current = ''
-    setError('')
-    setWordScore(null)
-    setProcessing(false)
+  if (!SpeechRecognition) {
+    setError('Speech recognition is not supported. On iPhone use Safari, on desktop use Chrome.')
+    return
+  }
 
-    const rec = new SpeechRecognition()
-    rec.lang = 'ta-IN'
-    rec.continuous = false
-    rec.interimResults = false
-    rec.maxAlternatives = 3
-    recognitionRef.current = rec
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
-    rec.onstart = () => setIsListening(true)
+  transcriptRef.current = ''
+  setIsListening(true)
+  setWordScore(null)
+  setError('')
+  setProcessing(false)
 
-    rec.onresult = (event) => {
-      let best = ''
+  const rec = new SpeechRecognition()
+  rec.lang = 'ta-IN'
+  rec.continuous = false
+  rec.interimResults = false
+  rec.maxAlternatives = isIOS ? 1 : 5
+
+  recognitionRef.current = rec
+
+  rec.onstart = () => setIsListening(true)
+
+  rec.onresult = (event) => {
+    let bestTranscript = ''
+    if (isIOS) {
+      bestTranscript = event.results[0]?.[0]?.transcript || ''
+    } else {
+      let bestConfidence = 0
       for (let i = 0; i < event.results.length; i++) {
         for (let j = 0; j < event.results[i].length; j++) {
-          const t = event.results[i][j].transcript || ''
-          if (t.length > best.length) best = t
+          if (event.results[i][j].confidence >= bestConfidence) {
+            bestConfidence = event.results[i][j].confidence
+            bestTranscript = event.results[i][j].transcript
+          }
         }
       }
-      transcriptRef.current = best
     }
-
-    rec.onend = () => {
-      const transcript = transcriptRef.current
-      const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-      recognitionRef.current = null
-      setIsListening(false)
-      setProcessing(false)
-      const calculated = (!transcript || transcript.trim() === '')
-        ? 0
-        : scoreWord(transcript, expectedTamil)
-      setWordScore(calculated)
-    }
-
-    rec.onerror = (event) => {
-      recognitionRef.current = null
-      setIsListening(false)
-      setProcessing(false)
-      // Show actual error code so we can debug on iOS
-      if (event.error === 'no-speech') {
-        syncAttempts(attemptsRef.current + 1)
-        setWordScore(0)
-        return
-      }
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setError('Microphone access denied. Tap Allow when prompted, then try again.')
-        return
-      }
-      // Show the raw error so we know what iOS is returning
-      setError(`Error: "${event.error}" — please screenshot this and let us know.`)
-    }
-
-    try {
-      rec.start()
-    } catch (e) {
-      setError(`Start failed: ${e.message}`)
-      setIsListening(false)
-    }
+    if (bestTranscript) transcriptRef.current = bestTranscript
   }
 
-  function stopListening() {
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch (e) {}
-    }
-    syncAttempts(attemptsRef.current + 1)
+  rec.onend = () => {
+    const transcript = transcriptRef.current
+    const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+    recognitionRef.current = null
     setIsListening(false)
-    setProcessing(true)
+    if (!transcript || transcript.trim() === '') {
+      setWordScore(0)
+      setProcessing(false)
+      return
+    }
+    const calculated = scoreWord(transcript, expectedTamil)
+    setWordScore(calculated)
+    setProcessing(false)
   }
+
+  rec.onerror = (event) => {
+    recognitionRef.current = null
+    setIsListening(false)
+    setProcessing(false)
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      // Try requesting permission explicitly then tell user to try again
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          stream.getTracks().forEach(t => t.stop())
+          setError('Microphone access granted. Please press Start again.')
+        })
+        .catch(() => {
+          setError('Microphone access denied. Please tap Allow when the popup appears.')
+        })
+      return
+    }
+    if (event.error === 'no-speech') {
+      setWordScore(0)
+      return
+    }
+    setError('Microphone issue. Please try again.')
+  }
+
+  // Start recognition directly — must be synchronous from user tap
+  try {
+    rec.start()
+  } catch (e) {
+    setIsListening(false)
+    setError('Could not start microphone. Please try again.')
+  }
+}
+function stopListening() {
+  if (recognitionRef.current) {
+    try { recognitionRef.current.stop() } catch (e) {}
+  }
+  setIsListening(false)
+  setProcessing(true)
+  setAttempts(a => a + 1)
+}
 
   function handleNext() {
     const finalScore = wordScore !== null ? wordScore : 0
@@ -274,26 +359,26 @@ function PronunciationSection() {
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">2.</span>
-              <p className="text-gray-600">Click <strong>Start</strong> to begin recording, then <strong>Stop</strong> when done saying the word.</p>
+              <p className="text-gray-600">Click <strong>Start</strong> to begin recording, then click <strong>Stop</strong> when you are done saying the word.</p>
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">3.</span>
-              <p className="text-gray-600">You get one more attempt if not happy with your first try.</p>
+              <p className="text-gray-600">You get one more attempt if you are not happy with your first try.</p>
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">4.</span>
-              <p className="text-gray-600">Maximum <strong>2 attempts per word</strong>.</p>
+              <p className="text-gray-600">Maximum <strong>2 attempts per word</strong>. Click Next Word when ready to move on.</p>
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">5.</span>
-              <p className="text-gray-600">After all 9 words you get your final score and Tamil title!</p>
+              <p className="text-gray-600">After all 9 words you will get your final score and Tamil title!</p>
             </div>
           </div>
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-sm text-amber-800">
-          ⚠️ Works best in <strong>Google Chrome</strong> on Android or desktop. On <strong>iPhone</strong>, use <strong>Safari</strong>. Allow access when prompted.
-        </div>
+  ⚠️ Works best in <strong>Chrome on Android or desktop</strong>. Not available on iOS devices.
+</div>
 
         <button
           onClick={startQuiz}
@@ -313,6 +398,7 @@ function PronunciationSection() {
           <h2 className="text-3xl font-bold text-red-800 mb-2">Your Results</h2>
           <p className="text-gray-500">Here is how you did across all 9 words.</p>
         </div>
+
         <div className="bg-white rounded-2xl shadow p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-700 mb-4">Word by Word</h3>
           <div className="space-y-3">
@@ -333,9 +419,12 @@ function PronunciationSection() {
             ))}
           </div>
         </div>
+
         {finalTier && (
           <div className={`rounded-2xl border p-8 text-center ${finalTier.bg} ${finalTier.border}`}>
-            <p className="text-6xl font-bold mb-2">{overallScore}<span className="text-3xl">/100</span></p>
+            <p className="text-6xl font-bold mb-2">
+              {overallScore}<span className="text-3xl">/100</span>
+            </p>
             <p className={`text-3xl font-bold mb-1 ${finalTier.color}`}>{finalTier.tamil}</p>
             <p className={`text-xl font-semibold mb-1 ${finalTier.color}`}>{finalTier.english}</p>
             <p className="text-gray-600 mb-6">{finalTier.message}</p>
@@ -347,6 +436,7 @@ function PronunciationSection() {
             />
           </div>
         )}
+
         <button
           onClick={startQuiz}
           className="w-full mt-6 bg-red-800 text-white py-4 rounded-xl text-lg font-bold hover:bg-red-700 transition"
@@ -396,17 +486,17 @@ function PronunciationSection() {
           }`}
         >
           {isListening
-            ? '⏹️ Stop'
-            : processing
-            ? 'Calculating...'
-            : attempts === 1
-            ? '🔁 Try Again'
-            : '🎤 Start'}
+  ? '🎙️Stop'
+  : processing
+  ? 'Calculating...'
+  : attempts === 1
+  ? '🔁 Try Again'
+  : '🎤 Start'}
         </button>
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-4 text-center text-sm">
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-4 text-center">
           {error}
         </div>
       )}
@@ -423,7 +513,7 @@ function PronunciationSection() {
         </div>
       )}
 
-      {attempts > 0 && !processing && !isListening && (
+      {attempts > 0 && !processing && (
         <button
           onClick={handleNext}
           className="w-full py-4 rounded-xl font-bold text-white text-lg bg-gray-700 hover:bg-gray-600 transition"
@@ -437,3 +527,4 @@ function PronunciationSection() {
 }
 
 export default PronunciationSection
+
