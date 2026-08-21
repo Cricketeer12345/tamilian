@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import pronunciationWords from '../../data/pronunciationWords'
 
 const tiers = [
@@ -119,8 +119,6 @@ function PronunciationSection() {
   const [isListening, setIsListening] = useState(false)
   const [error, setError] = useState('')
   const [processing, setProcessing] = useState(false)
-  const [micReady, setMicReady] = useState(false)
-  const [micError, setMicError] = useState('')
 
   const recognitionRef = useRef(null)
   const transcriptRef = useRef('')
@@ -131,19 +129,6 @@ function PronunciationSection() {
   function syncIndex(idx) { setCurrentIndex(idx); currentIndexRef.current = idx }
   function syncWords(w) { setWords(w); wordsRef.current = w }
   function syncAttempts(n) { setAttempts(n); attemptsRef.current = n }
-
-  // Request mic permission on mount — triggers native popup on all devices
-  // Stop stream immediately after — just needed the permission grant
-  useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then((stream) => {
-        stream.getTracks().forEach(t => t.stop())
-        setMicReady(true)
-      })
-      .catch(() => {
-        setMicError('Microphone access denied. Please reload and tap Allow when prompted.')
-      })
-  }, [])
 
   function startQuiz() {
     const selected = pickRandomWords()
@@ -172,6 +157,7 @@ function PronunciationSection() {
     setProcessing(false)
   }
 
+  // Called directly from button tap — no async before rec.start()
   function startListening() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) {
@@ -220,22 +206,24 @@ function PronunciationSection() {
       recognitionRef.current = null
       setIsListening(false)
       setProcessing(false)
+      // Show actual error code so we can debug on iOS
       if (event.error === 'no-speech') {
         syncAttempts(attemptsRef.current + 1)
         setWordScore(0)
         return
       }
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setError('Microphone blocked. Please reload the page and tap Allow.')
+        setError('Microphone access denied. Tap Allow when prompted, then try again.')
         return
       }
-      setError('Could not hear you. Please try again.')
+      // Show the raw error so we know what iOS is returning
+      setError(`Error: "${event.error}" — please screenshot this and let us know.`)
     }
 
     try {
       rec.start()
     } catch (e) {
-      setError('Could not start microphone. Please try again.')
+      setError(`Start failed: ${e.message}`)
       setIsListening(false)
     }
   }
@@ -277,12 +265,6 @@ function PronunciationSection() {
           <p className="text-gray-500">Test how well you can say Tamil words out loud.</p>
         </div>
 
-        {micError && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-6 text-center text-sm">
-            {micError}
-          </div>
-        )}
-
         <div className="bg-white rounded-2xl shadow p-6 mb-6">
           <h3 className="text-lg font-bold text-gray-800 mb-4">How it works</h3>
           <div className="space-y-4">
@@ -292,7 +274,7 @@ function PronunciationSection() {
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">2.</span>
-              <p className="text-gray-600">Click <strong>Start</strong> to begin recording, then click <strong>Stop</strong> when done saying the word.</p>
+              <p className="text-gray-600">Click <strong>Start</strong> to begin recording, then <strong>Stop</strong> when done saying the word.</p>
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">3.</span>
@@ -310,22 +292,14 @@ function PronunciationSection() {
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-sm text-amber-800">
-          {micReady
-            ? '✅ Microphone ready! Tap Start Practice to begin.'
-            : '⚠️ Allow microphone access when the popup appears. On iPhone, use Safari.'
-          }
+          ⚠️ Works best in <strong>Google Chrome</strong> on Android or desktop. On <strong>iPhone</strong>, use <strong>Safari</strong>. Allow access when prompted.
         </div>
 
         <button
           onClick={startQuiz}
-          disabled={!micReady}
-          className={`w-full py-4 rounded-xl text-lg font-bold transition ${
-            !micReady
-              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              : 'bg-red-800 text-white hover:bg-red-700'
-          }`}
+          className="w-full bg-red-800 text-white py-4 rounded-xl text-lg font-bold hover:bg-red-700 transition"
         >
-          {micReady ? 'Start Practice' : 'Waiting for microphone...'}
+          Start Practice
         </button>
       </div>
     )
@@ -432,7 +406,7 @@ function PronunciationSection() {
       )}
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-4 text-center">
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-4 text-center text-sm">
           {error}
         </div>
       )}
