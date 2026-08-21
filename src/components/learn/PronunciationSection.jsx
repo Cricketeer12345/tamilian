@@ -223,104 +223,78 @@ function PronunciationSection() {
   }
 
   function startListening() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setError('Speech recognition not supported. Please use Google Chrome.')
+      return
+    }
 
-  if (!SpeechRecognition) {
-    setError('Speech recognition is not supported. On iPhone use Safari, on desktop use Chrome.')
-    return
-  }
+    const rec = new SpeechRecognition()
+    rec.lang = 'ta-IN'
+    rec.interimResults = true
+    rec.maxAlternatives = 5
+    rec.continuous = true
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    transcriptRef.current = ''
+    recognitionRef.current = rec
 
-  transcriptRef.current = ''
-  setIsListening(true)
-  setWordScore(null)
-  setError('')
-  setProcessing(false)
+    setIsListening(true)
+    setWordScore(null)
+    setError('')
+    setProcessing(false)
 
-  const rec = new SpeechRecognition()
-  rec.lang = 'ta-IN'
-  rec.continuous = false
-  rec.interimResults = false
-  rec.maxAlternatives = isIOS ? 1 : 5
+    rec.start()
 
-  recognitionRef.current = rec
-
-  rec.onstart = () => setIsListening(true)
-
-  rec.onresult = (event) => {
-    let bestTranscript = ''
-    if (isIOS) {
-      bestTranscript = event.results[0]?.[0]?.transcript || ''
-    } else {
+    rec.onresult = (event) => {
+      // Collect all alternatives and pick the best one later
+      let bestTranscript = ''
       let bestConfidence = 0
       for (let i = 0; i < event.results.length; i++) {
         for (let j = 0; j < event.results[i].length; j++) {
-          if (event.results[i][j].confidence >= bestConfidence) {
+          if (event.results[i][j].confidence > bestConfidence) {
             bestConfidence = event.results[i][j].confidence
             bestTranscript = event.results[i][j].transcript
           }
         }
       }
+      if (bestTranscript) transcriptRef.current = bestTranscript
     }
-    if (bestTranscript) transcriptRef.current = bestTranscript
-  }
 
-  rec.onend = () => {
-    const transcript = transcriptRef.current
-    const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-    recognitionRef.current = null
-    setIsListening(false)
-    if (!transcript || transcript.trim() === '') {
-      setWordScore(0)
+    rec.onerror = (event) => {
+      if (event.error === 'no-speech') return
+      setError('Microphone issue. Please refresh and try again.')
+      setIsListening(false)
       setProcessing(false)
-      return
+      recognitionRef.current = null
     }
-    const calculated = scoreWord(transcript, expectedTamil)
-    setWordScore(calculated)
-    setProcessing(false)
+
+    rec.onend = () => {
+      const transcript = transcriptRef.current
+      const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
+
+      setIsListening(false)
+      recognitionRef.current = null
+
+      if (!transcript || transcript.trim() === '') {
+        setWordScore(0)
+        setProcessing(false)
+        return
+      }
+
+      const calculated = scoreWord(transcript, expectedTamil)
+      setWordScore(calculated)
+      setProcessing(false)
+    }
   }
 
-  rec.onerror = (event) => {
-    recognitionRef.current = null
-    setIsListening(false)
-    setProcessing(false)
-    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      // Try requesting permission explicitly then tell user to try again
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-          stream.getTracks().forEach(t => t.stop())
-          setError('Microphone access granted. Please press Start again.')
-        })
-        .catch(() => {
-          setError('Microphone access denied. Please tap Allow when the popup appears.')
-        })
-      return
+  function stopListening() {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch (e) {}
     }
-    if (event.error === 'no-speech') {
-      setWordScore(0)
-      return
-    }
-    setError('Microphone issue. Please try again.')
-  }
-
-  // Start recognition directly — must be synchronous from user tap
-  try {
-    rec.start()
-  } catch (e) {
     setIsListening(false)
-    setError('Could not start microphone. Please try again.')
+    setProcessing(true)
+    setAttempts(a => a + 1)
   }
-}
-function stopListening() {
-  if (recognitionRef.current) {
-    try { recognitionRef.current.stop() } catch (e) {}
-  }
-  setIsListening(false)
-  setProcessing(true)
-  setAttempts(a => a + 1)
-}
 
   function handleNext() {
     const finalScore = wordScore !== null ? wordScore : 0
@@ -377,8 +351,8 @@ function stopListening() {
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-sm text-amber-800">
-  ⚠️ Works best in <strong>Chrome on Android or desktop</strong>. Not available on iOS devices.
-</div>
+          ⚠️ Works best in <strong>Google Chrome</strong>. Allow microphone access when prompted.
+        </div>
 
         <button
           onClick={startQuiz}
@@ -486,12 +460,12 @@ function stopListening() {
           }`}
         >
           {isListening
-  ? '🎙️Stop'
-  : processing
-  ? 'Calculating...'
-  : attempts === 1
-  ? '🔁 Try Again'
-  : '🎤 Start'}
+            ? '⏹️ Stop'
+            : processing
+            ? 'Calculating...'
+            : attempts === 1
+            ? '🔁 Try Again'
+            : '🎤 Start'}
         </button>
       )}
 
@@ -527,4 +501,3 @@ function stopListening() {
 }
 
 export default PronunciationSection
-
