@@ -140,28 +140,21 @@ function PronunciationSection() {
 
   // iOS: request mic permission on mount and KEEP STREAM ALIVE
   useEffect(() => {
-    if (!isIOS) return
-
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then((stream) => {
-        // CRITICAL: Do NOT stop the stream. Keep it alive.
-        // This is what allows speech recognition to work without re-asking permission.
-        streamRef.current = stream
-        setMicReady(true)
-        setMicError('')
-      })
-      .catch(() => {
-        setMicError('Microphone access denied. Please reload and tap Allow when prompted.')
-      })
-
-    return () => {
-      // Only stop stream on full unmount
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop())
-        streamRef.current = null
-      }
-    }
-  }, [])
+  if (!isIOS) return
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then((stream) => {
+      // Stop stream immediately — we only needed the permission popup
+      // Permission stays granted for the entire session on iOS
+      // Keeping the stream alive was BLOCKING speech recognition from accessing the mic
+      stream.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      setMicReady(true)
+      setMicError('')
+    })
+    .catch(() => {
+      setMicError('Microphone access denied. Please reload and tap Allow when prompted.')
+    })
+}, [])
 
   function startQuiz() {
     const selected = pickRandomWords()
@@ -203,81 +196,78 @@ function PronunciationSection() {
 
   // Called directly and synchronously from button tap
   function startListening() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      setError('Speech recognition not supported. On iPhone use Safari, on desktop use Chrome.')
-      return
-    }
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (!SpeechRecognition) {
+    setError('Speech recognition not supported. On iPhone use Safari, on desktop use Chrome.')
+    return
+  }
 
-    transcriptRef.current = ''
-    setError('')
-    setWordScore(null)
-    setProcessing(false)
+  transcriptRef.current = ''
+  setError('')
+  setWordScore(null)
+  setProcessing(false)
 
-    const rec = new SpeechRecognition()
-    rec.lang = 'ta-IN'
-    rec.continuous = false
-    rec.interimResults = false
-    rec.maxAlternatives = isIOS ? 1 : 5
-    recognitionRef.current = rec
+  const rec = new SpeechRecognition()
+  rec.lang = 'ta-IN'
+  rec.continuous = false
+  rec.interimResults = false
+  rec.maxAlternatives = isIOS ? 1 : 5
+  recognitionRef.current = rec
 
-    rec.onstart = () => setIsListening(true)
+  rec.onstart = () => setIsListening(true)
 
-    rec.onresult = (event) => {
-      let best = ''
-      for (let i = 0; i < event.results.length; i++) {
-        for (let j = 0; j < event.results[i].length; j++) {
-          const t = event.results[i][j].transcript || ''
-          if (t.length > best.length) best = t
-        }
-      }
-      transcriptRef.current = best
-
-      // On iOS, score in onresult since onend may fire before this completes
-      if (isIOS) {
-        syncAttempts(attemptsRef.current + 1)
-        processResult(best)
+  rec.onresult = (event) => {
+    let best = ''
+    for (let i = 0; i < event.results.length; i++) {
+      for (let j = 0; j < event.results[i].length; j++) {
+        const t = event.results[i][j].transcript || ''
+        if (t.length > best.length) best = t
       }
     }
+    transcriptRef.current = best
 
-    rec.onend = () => {
-      // Non-iOS scores here after stop is pressed
-      if (!isIOS) {
-        processResult(transcriptRef.current)
-      } else if (!transcriptRef.current) {
-        // iOS: onend fired with nothing heard
-        syncAttempts(attemptsRef.current + 1)
-        processResult('')
-      }
-      setIsListening(false)
-      recognitionRef.current = null
-    }
-
-    rec.onerror = (event) => {
-      recognitionRef.current = null
-      setIsListening(false)
-      setProcessing(false)
-      if (event.error === 'no-speech') {
-        syncAttempts(attemptsRef.current + 1)
-        setWordScore(0)
-        return
-      }
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setMicReady(false)
-        setError('Microphone blocked. Please reload the page and tap Allow.')
-        return
-      }
-      setError('Could not hear you. Please try again.')
-    }
-
-    // Must be synchronous — no await before this
-    try {
-      rec.start()
-    } catch (e) {
-      setError('Could not start microphone. Please try again.')
-      setIsListening(false)
+    if (isIOS) {
+      syncAttempts(attemptsRef.current + 1)
+      processResult(best)
     }
   }
+
+  rec.onend = () => {
+    if (!isIOS) {
+      processResult(transcriptRef.current)
+    } else if (!transcriptRef.current) {
+      syncAttempts(attemptsRef.current + 1)
+      processResult('')
+    }
+    setIsListening(false)
+    recognitionRef.current = null
+  }
+
+  rec.onerror = (event) => {
+    recognitionRef.current = null
+    setIsListening(false)
+    setProcessing(false)
+    if (event.error === 'no-speech') {
+      syncAttempts(attemptsRef.current + 1)
+      setWordScore(0)
+      return
+    }
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      setMicReady(false)
+      setError('Microphone blocked. Please reload the page and tap Allow.')
+      return
+    }
+    setError('Could not hear you. Please try again.')
+  }
+
+  // Synchronous — called directly from tap with nothing async before it
+  try {
+    rec.start()
+  } catch (e) {
+    setError('Could not start microphone. Please try again.')
+    setIsListening(false)
+  }
+}
 
   function stopListening() {
     // Only for non-iOS
