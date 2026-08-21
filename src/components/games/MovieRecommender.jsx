@@ -1,6 +1,5 @@
 import { useState } from 'react'
 
-// 🔧 PASTE YOUR TMDB API READ ACCESS TOKEN HERE
 const TMDB_TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJmMmRiNTUyYzIyYjc5OGZmMzY5ZTI1YjI1NzI5MzRjOSIsIm5iZiI6MTc4NTU0MzAyNS45MjYsInN1YiI6IjZhNmQzOTcxNjk0Y2JhYjY3YTk2NjU2NSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.flrj3iVMTpfoZtAvMS1LCdkryDs9ofn9-V8pI4cOJWQ'
 const TMDB_BASE = 'https://api.themoviedb.org/3'
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500'
@@ -18,31 +17,14 @@ const genres = [
 ]
 
 const popularActors = [
-  'Any',
-  'Rajinikanth',
-  'Vijay',
-  'Ajith Kumar',
-  'Kamal Haasan',
-  'Dhanush',
-  'Vikram',
-  'Suriya',
-  'Sivakarthikeyan',
-  'Vijay Sethupathi',
-  'STR Simbu',
+  'Any', 'Rajinikanth', 'Vijay', 'Ajith Kumar', 'Kamal Haasan',
+  'Dhanush', 'Vikram', 'Suriya', 'Sivakarthikeyan', 'Vijay Sethupathi', 'STR Simbu',
 ]
 
 const popularDirectors = [
-  'Any',
-  'Shankar',
-  'Mani Ratnam',
-  'Lokesh Kanagaraj',
-  'Atlee',
-  'Vetrimaaran',
-  'AR Murugadoss',
-  'Pa Ranjith',
-  'Karthik Subbaraj',
-  'Nelson Dilipkumar',
-  'Gautham Menon',
+  'Any', 'Shankar', 'Mani Ratnam', 'Lokesh Kanagaraj', 'Atlee',
+  'Vetrimaaran', 'AR Murugadoss', 'Pa Ranjith', 'Karthik Subbaraj',
+  'Nelson Dilipkumar', 'Gautham Menon',
 ]
 
 const yearRanges = [
@@ -66,17 +48,13 @@ const ratings = [
 
 async function tmdbFetch(url) {
   const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${TMDB_TOKEN}`,
-      'Content-Type': 'application/json',
-    }
+    headers: { Authorization: `Bearer ${TMDB_TOKEN}`, 'Content-Type': 'application/json' }
   })
   return res.json()
 }
 
 async function getMovieCredits(movieId) {
   const data = await tmdbFetch(`${TMDB_BASE}/movie/${movieId}/credits?language=en-US`)
-  // Only pick crew member whose job is exactly "Director"
   const director = data.crew?.find(c => c.job === 'Director')?.name || 'Unknown'
   const cast = data.cast?.slice(0, 3).map(c => c.name).join(', ') || 'Unknown'
   return { director, cast }
@@ -84,10 +62,8 @@ async function getMovieCredits(movieId) {
 
 async function searchMovies(filters) {
   const { selectedGenres, yearRange, minRating, sortBy, actor, director } = filters
-
   const isSuperhit = selectedGenres.some(g => g.label === 'Superhit')
   const otherGenres = selectedGenres.filter(g => g.label !== 'Superhit')
-
   const genreIds = otherGenres.length > 0
     ? [...new Set(otherGenres.flatMap(g => g.tmdbIds))].join('|')
     : ''
@@ -104,12 +80,24 @@ async function searchMovies(filters) {
     dateTo = `${yearRange.max}-12-31`
   }
 
+  // Director — get exact list of directed movies first
+  let directorMovieIds = null
+  if (director && director !== 'Any') {
+    const directorSearch = await tmdbFetch(
+      `${TMDB_BASE}/search/person?query=${encodeURIComponent(director)}&language=en-US`
+    )
+    const directorResult = directorSearch.results?.find(p => p.known_for_department === 'Directing')
+    if (directorResult) {
+      const credits = await tmdbFetch(`${TMDB_BASE}/person/${directorResult.id}/movie_credits?language=en-US`)
+      directorMovieIds = new Set(credits.crew?.filter(c => c.job === 'Director').map(c => c.id) || [])
+    }
+  }
+
   let url = `${TMDB_BASE}/discover/movie?with_original_language=ta&region=IN&language=en-US`
   url += `&primary_release_date.gte=${dateFrom}`
   url += `&primary_release_date.lte=${dateTo}`
   if (genreIds) url += `&with_genres=${genreIds}`
 
-  // Superhit definition: high rating + many votes = overperformed expectations
   if (isSuperhit) {
     url += `&vote_average.gte=6.5&vote_count.gte=50&sort_by=vote_count.desc`
   } else {
@@ -117,41 +105,26 @@ async function searchMovies(filters) {
     url += `&sort_by=${sortBy}`
   }
 
-  // Actor search
   if (actor && actor !== 'Any') {
-    const actorSearch = await tmdbFetch(
-      `${TMDB_BASE}/search/person?query=${encodeURIComponent(actor)}&language=en-US`
-    )
-    // Find person who is known for acting, not directing
-    const actorResult = actorSearch.results?.find(
-      p => p.known_for_department === 'Acting'
-    )
+    const actorSearch = await tmdbFetch(`${TMDB_BASE}/search/person?query=${encodeURIComponent(actor)}&language=en-US`)
+    const actorResult = actorSearch.results?.find(p => p.known_for_department === 'Acting')
     if (actorResult) url += `&with_cast=${actorResult.id}`
   }
 
-  // Director search — strict match by name and department
-  if (director && director !== 'Any') {
-    const directorSearch = await tmdbFetch(
-      `${TMDB_BASE}/search/person?query=${encodeURIComponent(director)}&language=en-US`
-    )
-    // Only pick someone whose known department is Directing
-    const directorResult = directorSearch.results?.find(
-      p => p.known_for_department === 'Directing'
-    )
-    if (directorResult) {
-      // Use with_crew for director role specifically
-      url += `&with_crew=${directorResult.id}`
-    }
+  const data = await tmdbFetch(url)
+  let results = data.results || []
+
+  if (directorMovieIds) {
+    results = results.filter(movie => directorMovieIds.has(movie.id))
   }
 
-  const data = await tmdbFetch(url)
-  return data.results || []
+  return results
 }
 
 function StarRating({ rating }) {
   const score = Math.round(rating) / 2
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 flex-wrap">
       {[1, 2, 3, 4, 5].map(i => (
         <span key={i} className={i <= score ? 'text-yellow-400' : 'text-gray-300'}>★</span>
       ))}
@@ -180,48 +153,37 @@ function MovieRecommender() {
   }
 
   async function handleSearch() {
-  setLoading(true)
-  setError('')
-  setMovies([])
-  setSearched(true)
-
-  try {
-    const results = await searchMovies({
-      selectedGenres,
-      yearRange,
-      minRating: minRating.value,
-      sortBy,
-      actor,
-      director,
-    })
-
-    const detailed = await Promise.all(
-      results.slice(0, count).map(async movie => {
-        const { director: dir, cast } = await getMovieCredits(movie.id)
-        return { ...movie, director: dir, cast }
-      })
-    )
-
-    setMovies(detailed)
-  } catch (e) {
-    setError('Something went wrong fetching movies. Check your API token and try again.')
+    setLoading(true)
+    setError('')
+    setMovies([])
+    setSearched(true)
+    try {
+      const results = await searchMovies({ selectedGenres, yearRange, minRating: minRating.value, sortBy, actor, director })
+      const detailed = await Promise.all(
+        results.slice(0, count).map(async movie => {
+          const { director: dir, cast } = await getMovieCredits(movie.id)
+          return { ...movie, director: dir, cast }
+        })
+      )
+      setMovies(detailed)
+    } catch (e) {
+      setError('Something went wrong fetching movies. Check your API token and try again.')
+    }
+    setLoading(false)
   }
 
-  setLoading(false)
-}
-
   function handleReset() {
-  setSelectedGenres([])
-  setYearRange(yearRanges[0])
-  setMinRating(ratings[0])
-  setSortBy('vote_average.desc')
-  setActor('Any')
-  setDirector('Any')
-  setCount(10)
-  setMovies([])
-  setSearched(false)
-  setError('')
-}
+    setSelectedGenres([])
+    setYearRange(yearRanges[0])
+    setMinRating(ratings[0])
+    setSortBy('vote_average.desc')
+    setActor('Any')
+    setDirector('Any')
+    setCount(10)
+    setMovies([])
+    setSearched(false)
+    setError('')
+  }
 
   return (
     <div className="max-w-5xl mx-auto py-10 px-4">
@@ -233,7 +195,7 @@ function MovieRecommender() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-2xl shadow p-6 mb-8">
+      <div className="bg-white rounded-2xl shadow p-4 md:p-6 mb-8">
 
         {/* Genre */}
         <div className="mb-6">
@@ -243,7 +205,7 @@ function MovieRecommender() {
               <button
                 key={genre.label}
                 onClick={() => toggleGenre(genre)}
-                className={`px-4 py-2 rounded-full text-sm font-semibold border transition ${
+                className={`px-3 py-1.5 rounded-full text-sm font-semibold border transition ${
                   selectedGenres.includes(genre)
                     ? 'bg-red-800 text-white border-red-800'
                     : 'bg-white text-gray-600 border-gray-300 hover:border-red-400'
@@ -255,131 +217,76 @@ function MovieRecommender() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div>
+            <h3 className="text-sm font-bold text-gray-700 mb-2">Era</h3>
+            <select value={yearRange.label} onChange={e => setYearRange(yearRanges.find(y => y.label === e.target.value))}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white">
+              {yearRanges.map(y => <option key={y.label} value={y.label}>{y.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-gray-700 mb-2">Minimum IMDB Rating</h3>
+            <select value={minRating.label} onChange={e => setMinRating(ratings.find(r => r.label === e.target.value))}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white">
+              {ratings.map(r => <option key={r.label} value={r.label}>{r.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-gray-700 mb-2">Sort By</h3>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white">
+              <option value="vote_average.desc">Highest Rated</option>
+              <option value="popularity.desc">Most Popular</option>
+              <option value="primary_release_date.desc">Newest First</option>
+              <option value="primary_release_date.asc">Oldest First</option>
+            </select>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-gray-700 mb-2">Lead Actor</h3>
+            <select value={actor} onChange={e => setActor(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white">
+              {popularActors.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-gray-700 mb-2">Director</h3>
+            <select value={director} onChange={e => setDirector(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white">
+              {popularDirectors.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+        </div>
 
-  {/* Era */}
-  <div>
-    <h3 className="text-sm font-bold text-gray-700 mb-2">Era</h3>
-    <select
-      value={yearRange.label}
-      onChange={e => setYearRange(yearRanges.find(y => y.label === e.target.value))}
-      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white"
-    >
-      {yearRanges.map(y => (
-        <option key={y.label} value={y.label}>{y.label}</option>
-      ))}
-    </select>
-  </div>
+        <div className="mb-6">
+          <h3 className="text-sm font-bold text-gray-700 mb-2">
+            Number of movies to show: <span className="text-red-800">{count}</span>
+          </h3>
+          <input type="range" min={5} max={20} step={5} value={count}
+            onChange={e => setCount(Number(e.target.value))} className="w-full accent-red-800" />
+          <div className="flex justify-between text-xs text-gray-400 mt-1">
+            <span>5</span><span>10</span><span>15</span><span>20</span>
+          </div>
+        </div>
 
-  {/* Min Rating */}
-  <div>
-    <h3 className="text-sm font-bold text-gray-700 mb-2">Minimum IMDB Rating</h3>
-    <select
-      value={minRating.label}
-      onChange={e => setMinRating(ratings.find(r => r.label === e.target.value))}
-      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white"
-    >
-      {ratings.map(r => (
-        <option key={r.label} value={r.label}>{r.label}</option>
-      ))}
-    </select>
-  </div>
-
-  {/* Sort By */}
-  <div>
-    <h3 className="text-sm font-bold text-gray-700 mb-2">Sort By</h3>
-    <select
-      value={sortBy}
-      onChange={e => setSortBy(e.target.value)}
-      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white"
-    >
-      <option value="vote_average.desc">Highest Rated</option>
-      <option value="popularity.desc">Most Popular</option>
-      <option value="primary_release_date.desc">Newest First</option>
-      <option value="primary_release_date.asc">Oldest First</option>
-    </select>
-  </div>
-
-  {/* Actor */}
-<div>
-  <h3 className="text-sm font-bold text-gray-700 mb-2">Lead Actor</h3>
-  <select
-    value={actor}
-    onChange={e => setActor(e.target.value)}
-    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white"
-  >
-    {popularActors.map(a => (
-      <option key={a} value={a}>{a}</option>
-    ))}
-  </select>
-</div>
-
-{/* Director */}
-<div>
-  <h3 className="text-sm font-bold text-gray-700 mb-2">Director</h3>
-  <select
-    value={director}
-    onChange={e => setDirector(e.target.value)}
-    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-red-400 bg-white"
-  >
-    {popularDirectors.map(d => (
-      <option key={d} value={d}>{d}</option>
-    ))}
-  </select>
-</div>
-
-</div>
-
-{/* Count Slider */}
-<div className="mb-6">
-  <h3 className="text-sm font-bold text-gray-700 mb-2">
-    Number of movies to show: <span className="text-red-800">{count}</span>
-  </h3>
-  <input
-    type="range"
-    min={5}
-    max={20}
-    step={5}
-    value={count}
-    onChange={e => setCount(Number(e.target.value))}
-    className="w-full accent-red-800"
-  />
-  <div className="flex justify-between text-xs text-gray-400 mt-1">
-    <span>5</span><span>10</span><span>15</span><span>20</span>
-  </div>
-</div>
-
-        {/* Buttons */}
         <div className="flex gap-3">
-          <button
-            onClick={handleSearch}
-            disabled={loading}
-            className={`flex-1 py-3 rounded-xl font-bold text-white transition ${
-              loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-800 hover:bg-red-700'
-            }`}
-          >
+          <button onClick={handleSearch} disabled={loading}
+            className={`flex-1 py-3 rounded-xl font-bold text-white transition ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-800 hover:bg-red-700'}`}>
             {loading ? 'Searching...' : '🎬 Find Movies'}
           </button>
           {searched && (
-            <button
-              onClick={handleReset}
-              className="px-6 py-3 rounded-xl font-bold text-gray-600 border border-gray-300 hover:bg-gray-50 transition"
-            >
+            <button onClick={handleReset}
+              className="px-6 py-3 rounded-xl font-bold text-gray-600 border border-gray-300 hover:bg-gray-50 transition">
               Reset
             </button>
           )}
         </div>
-
       </div>
 
-      {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-6 text-center">
-          {error}
-        </div>
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-6 text-center">{error}</div>
       )}
 
-      {/* Loading */}
       {loading && (
         <div className="text-center py-16">
           <p className="text-4xl mb-4 animate-bounce">🎬</p>
@@ -393,57 +300,84 @@ function MovieRecommender() {
           <h3 className="text-xl font-bold text-red-800 mb-6">{movies.length} movies found</h3>
           <div className="flex flex-col gap-6">
             {movies.map((movie, i) => (
-              <div key={i} className="bg-white rounded-2xl shadow hover:shadow-lg transition flex overflow-hidden">
+              <div key={i} className="bg-white rounded-2xl shadow hover:shadow-lg transition overflow-hidden">
 
-                {/* Poster */}
-                <div className="w-36 flex-shrink-0">
+                {/* Mobile layout — poster on top, details below */}
+                <div className="flex md:hidden flex-col">
                   {movie.poster_path ? (
                     <img
                       src={`${TMDB_IMG}${movie.poster_path}`}
                       alt={movie.title}
-                      className="w-full h-full object-cover"
+                      className="w-full h-56 object-cover"
                     />
                   ) : (
-                    <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+                    <div className="w-full h-32 bg-gray-100 flex items-center justify-center">
                       <span className="text-4xl">🎬</span>
                     </div>
                   )}
-                </div>
-
-                {/* Details */}
-                <div className="flex-1 p-6">
-                  <div className="flex items-start justify-between gap-4 mb-2">
-                    <div>
-                      <h4 className="text-xl font-bold text-gray-800">{movie.title}</h4>
-                      {movie.original_title !== movie.title && (
-                        <p className="text-gray-400 text-sm">{movie.original_title}</p>
-                      )}
-                    </div>
-                    <div className="flex-shrink-0 text-right">
+                  <div className="p-4">
+                    <h4 className="text-lg font-bold text-gray-800 mb-1">{movie.title}</h4>
+                    {movie.original_title !== movie.title && (
+                      <p className="text-gray-400 text-sm mb-2">{movie.original_title}</p>
+                    )}
+                    <div className="flex items-center justify-between mb-3">
                       <StarRating rating={movie.vote_average} />
-                      <p className="text-xs text-gray-400 mt-1">
-                        {movie.release_date?.slice(0, 4)}
-                      </p>
+                      <span className="text-xs text-gray-400">{movie.release_date?.slice(0, 4)}</span>
                     </div>
+                    <div className="text-sm text-gray-500 mb-3">
+                      <p><span className="font-semibold text-gray-700">Director:</span> {movie.director}</p>
+                      <p><span className="font-semibold text-gray-700">Cast:</span> {movie.cast}</p>
+                    </div>
+                    <p className="text-gray-600 text-sm leading-relaxed">
+                      {movie.overview || 'No description available.'}
+                    </p>
                   </div>
-
-                  <div className="text-sm text-gray-500 mb-3">
-                    <span className="font-semibold text-gray-700">Director:</span> {movie.director} &nbsp;|&nbsp;
-                    <span className="font-semibold text-gray-700">Cast:</span> {movie.cast}
-                  </div>
-
-                  <p className="text-gray-600 text-sm leading-relaxed mb-3">
-                    {movie.overview || 'No description available.'}
-                  </p>
-
                 </div>
+
+                {/* Desktop layout — poster left, details right */}
+                <div className="hidden md:flex">
+                  <div className="w-36 flex-shrink-0">
+                    {movie.poster_path ? (
+                      <img
+                        src={`${TMDB_IMG}${movie.poster_path}`}
+                        alt={movie.title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+                        <span className="text-4xl">🎬</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 p-6 min-w-0">
+                    <div className="flex items-start justify-between gap-4 mb-2">
+                      <div className="min-w-0">
+                        <h4 className="text-xl font-bold text-gray-800">{movie.title}</h4>
+                        {movie.original_title !== movie.title && (
+                          <p className="text-gray-400 text-sm">{movie.original_title}</p>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0 text-right">
+                        <StarRating rating={movie.vote_average} />
+                        <p className="text-xs text-gray-400 mt-1">{movie.release_date?.slice(0, 4)}</p>
+                      </div>
+                    </div>
+                    <div className="text-sm text-gray-500 mb-3">
+                      <span className="font-semibold text-gray-700">Director:</span> {movie.director} &nbsp;|&nbsp;
+                      <span className="font-semibold text-gray-700">Cast:</span> {movie.cast}
+                    </div>
+                    <p className="text-gray-600 text-sm leading-relaxed">
+                      {movie.overview || 'No description available.'}
+                    </p>
+                  </div>
+                </div>
+
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* No results */}
       {!loading && searched && movies.length === 0 && !error && (
         <div className="text-center py-16">
           <p className="text-4xl mb-4">🎭</p>
