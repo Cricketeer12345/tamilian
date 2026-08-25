@@ -190,17 +190,17 @@ function PronunciationSection() {
 
   navigator.mediaDevices.getUserMedia({ audio: true })
     .then(stream => {
+      setIsListening(true)
 
       if (isIOS) {
         // On iOS: stop stream immediately so SpeechRecognition can access the mic
-        // Permission stays granted after getUserMedia resolves
+        // getUserMedia was only needed to trigger the permission popup
         stream.getTracks().forEach(t => t.stop())
         streamRef.current = null
-        setIsListening(true)
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
         if (!SpeechRecognition) {
-          setError('Speech recognition not supported on this browser.')
+          setError('Speech recognition not supported. Please use Safari on iPhone.')
           setIsListening(false)
           return
         }
@@ -242,7 +242,7 @@ function PronunciationSection() {
             setWordScore(0)
             return
           }
-          setError(`Error: ${event.error}. Please try again.`)
+          setError(`Microphone error: ${event.error}. Please try again.`)
         }
 
         try {
@@ -253,9 +253,8 @@ function PronunciationSection() {
         }
 
       } else {
-        // Non-iOS: use MediaRecorder + SpeechRecognition in parallel
+        // Non-iOS: MediaRecorder + SpeechRecognition in parallel (unchanged)
         streamRef.current = stream
-        setIsListening(true)
 
         const chunks = []
         let recorder
@@ -317,23 +316,25 @@ function PronunciationSection() {
     })
 }
 
-  // Step 4: Stop everything, compile blob, score
-  function stopListening() {
+function stopListening() {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 
   if (isIOS) {
-    // Stop SpeechRecognition — onend will fire and score
+    // Stop SpeechRecognition — rec.onend will fire and score automatically
     if (recognitionRef.current) {
       try { recognitionRef.current.stop() } catch (e) {}
     }
+    syncAttempts(attemptsRef.current + 1)
+    setIsListening(false)
+    setProcessing(true)
   } else {
     // Stop SpeechRecognition
     if (recognitionRef.current) {
       try { recognitionRef.current.stop() } catch (e) {}
       recognitionRef.current = null
     }
-    // Stop MediaRecorder — onstop will fire and score
+    // Stop MediaRecorder — onstop fires and scores
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
     } else {
@@ -347,11 +348,10 @@ function PronunciationSection() {
         streamRef.current = null
       }
     }
+    syncAttempts(attemptsRef.current + 1)
+    setIsListening(false)
+    setProcessing(true)
   }
-
-  syncAttempts(attemptsRef.current + 1)
-  setIsListening(false)
-  setProcessing(true)
 }
 
   function handleNext() {
