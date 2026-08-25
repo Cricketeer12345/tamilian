@@ -79,7 +79,7 @@ function SongAssociation() {
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">3.</span>
-              <p className="text-gray-600">After 10 seconds, example songs will be revealed.</p>
+              <p className="text-gray-600">After 10 seconds, <strong>example songs</strong> will be revealed.</p>
             </div>
             <div className="flex gap-4">
               <span className="text-red-800 font-bold text-lg">4.</span>
