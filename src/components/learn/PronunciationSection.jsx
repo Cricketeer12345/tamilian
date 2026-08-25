@@ -179,88 +179,24 @@ function PronunciationSection() {
   // Step 2: Start MediaRecorder with the stream for actual recording
   // Step 3: Also run SpeechRecognition in parallel to get text for scoring
   function startListening() {
-  setError('')
-  setWordScore(null)
-  setAudioUrl(null)
-  transcriptRef.current = ''
-  audioChunksRef.current = []
+    setError('')
+    setWordScore(null)
+    setAudioUrl(null)
+    transcriptRef.current = ''
+    audioChunksRef.current = []
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-
-  navigator.mediaDevices.getUserMedia({ audio: true })
-    .then(stream => {
-      setIsListening(true)
-
-      if (isIOS) {
-        // On iOS: stop stream immediately so SpeechRecognition can access the mic
-        // getUserMedia was only needed to trigger the permission popup
-        stream.getTracks().forEach(t => t.stop())
-        streamRef.current = null
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-        if (!SpeechRecognition) {
-          setError('Speech recognition not supported. Please use Safari on iPhone.')
-          setIsListening(false)
-          return
-        }
-
-        const rec = new SpeechRecognition()
-        rec.lang = 'ta-IN'
-        rec.continuous = false
-        rec.interimResults = false
-        rec.maxAlternatives = 3
-        recognitionRef.current = rec
-
-        rec.onresult = event => {
-          let best = ''
-          for (let i = 0; i < event.results.length; i++) {
-            for (let j = 0; j < event.results[i].length; j++) {
-              const t = event.results[i][j].transcript || ''
-              if (t.length > best.length) best = t
-            }
-          }
-          transcriptRef.current = best
-        }
-
-        rec.onend = () => {
-          recognitionRef.current = null
-          const transcript = transcriptRef.current
-          const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-          const calculated = transcript ? scoreWord(transcript, expectedTamil) : 0
-          setWordScore(calculated)
-          setProcessing(false)
-          setIsListening(false)
-        }
-
-        rec.onerror = event => {
-          recognitionRef.current = null
-          setIsListening(false)
-          setProcessing(false)
-          if (event.error === 'no-speech') {
-            syncAttempts(attemptsRef.current + 1)
-            setWordScore(0)
-            return
-          }
-          setError(`Microphone error: ${event.error}. Please try again.`)
-        }
-
-        try {
-          rec.start()
-        } catch (e) {
-          setError('Could not start microphone. Please try again.')
-          setIsListening(false)
-        }
-
-      } else {
-        // Non-iOS: MediaRecorder + SpeechRecognition in parallel (unchanged)
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
         streamRef.current = stream
+        setIsListening(true)
 
+        // --- MediaRecorder: records audio blob ---
         const chunks = []
         let recorder
         try {
           recorder = new MediaRecorder(stream)
         } catch (e) {
+          // MediaRecorder not supported — fall back to recognition only
           recorder = null
         }
 
@@ -270,20 +206,28 @@ function PronunciationSection() {
             if (e.data && e.data.size > 0) chunks.push(e.data)
           }
           recorder.onstop = () => {
+            // Package audio blob and create playback URL
             const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
             const url = URL.createObjectURL(blob)
             setAudioUrl(url)
+
+            // Release mic tracks
             stream.getTracks().forEach(t => t.stop())
             streamRef.current = null
+
+            // Score from transcript if SpeechRecognition got something
             const transcript = transcriptRef.current
             const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
-            const calculated = transcript ? scoreWord(transcript, expectedTamil) : 0
+            const calculated = transcript
+              ? scoreWord(transcript, expectedTamil)
+              : 0
             setWordScore(calculated)
             setProcessing(false)
           }
           try { recorder.start() } catch (e) {}
         }
 
+        // --- SpeechRecognition: runs in parallel for text scoring ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
         if (SpeechRecognition) {
           const rec = new SpeechRecognition()
@@ -304,40 +248,37 @@ function PronunciationSection() {
             transcriptRef.current = best
           }
 
-          rec.onerror = () => { recognitionRef.current = null }
-          rec.onend = () => { recognitionRef.current = null }
+          rec.onerror = () => {
+            // Silent fail — MediaRecorder still running
+            recognitionRef.current = null
+          }
 
-          try { rec.start() } catch (e) { recognitionRef.current = null }
+          rec.onend = () => {
+            recognitionRef.current = null
+          }
+
+          try { rec.start() } catch (e) {
+            // Silent fail — MediaRecorder still covers recording
+            recognitionRef.current = null
+          }
         }
-      }
-    })
-    .catch(() => {
-      setError('Microphone access denied. Tap Allow when the popup appears.')
-    })
-}
-
+      })
+      .catch(() => {
+        setError('Microphone access denied. Tap Allow when the popup appears.')
+      })
+  }
 function stopListening() {
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-
-  if (isIOS) {
-    // Stop SpeechRecognition — rec.onend will fire and score automatically
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch (e) {}
-    }
-    syncAttempts(attemptsRef.current + 1)
-    setIsListening(false)
-    setProcessing(true)
-  } else {
     // Stop SpeechRecognition
     if (recognitionRef.current) {
       try { recognitionRef.current.stop() } catch (e) {}
       recognitionRef.current = null
     }
-    // Stop MediaRecorder — onstop fires and scores
+
+    // Stop MediaRecorder — onstop will fire and score
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
     } else {
+      // No MediaRecorder — score from transcript directly
       const transcript = transcriptRef.current
       const expectedTamil = wordsRef.current[currentIndexRef.current]?.tamil
       const calculated = transcript ? scoreWord(transcript, expectedTamil) : 0
@@ -348,11 +289,13 @@ function stopListening() {
         streamRef.current = null
       }
     }
+
     syncAttempts(attemptsRef.current + 1)
     setIsListening(false)
     setProcessing(true)
   }
-}
+
+
 
   function handleNext() {
     const finalScore = wordScore !== null ? wordScore : 0
