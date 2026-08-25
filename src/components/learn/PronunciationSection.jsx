@@ -352,7 +352,7 @@ function stopListening() {
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8 text-sm text-amber-800">
-          ⚠️ Works on <strong>Chrome (Android/desktop)</strong> and <strong>Safari (iPhone)</strong>. Tap Allow when the microphone popup appears.
+          ⚠️ Works on <strong>Chrome (Android/desktop)</strong>. Not available on iOS yet. Tap Allow when the microphone popup appears.
         </div>
 
         <button
